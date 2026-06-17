@@ -6,7 +6,6 @@ import Placeholder from '@tiptap/extension-placeholder';
 import {
   Bold,
   Code2,
-  Copy,
   Heading1,
   Heading2,
   Heading3,
@@ -20,12 +19,13 @@ import {
   AlignCenter,
   AlignLeft,
   AlignRight,
+  Copy,
 } from 'lucide-react';
 import type { Note } from '../types';
 import { DEFAULT_TAGS } from '../lib/db';
 import { fileToBase64Image } from '../lib/image';
 import { formatFullDate } from '../lib/date';
-import { CODE_LANGUAGES, copyCodeFromPre, highlightCodeBlocks } from '../editor/codeBlockUtils';
+import { CODE_LANGUAGES } from '../editor/codeBlockUtils';
 import { ResizableImage } from '../editor/ResizableImage';
 import { IconButton } from './IconButton';
 
@@ -54,6 +54,12 @@ interface ImageMenu {
   y: number;
 }
 
+interface CodeCopyOverlay {
+  text: string;
+  x: number;
+  y: number;
+}
+
 export function EditorPane({
   note,
   saveState,
@@ -67,6 +73,7 @@ export function EditorPane({
   const [codeLanguage, setCodeLanguage] = useState('javascript');
   const [imageBubble, setImageBubble] = useState<ImageBubble | null>(null);
   const [imageMenu, setImageMenu] = useState<ImageMenu | null>(null);
+  const [codeCopyOverlay, setCodeCopyOverlay] = useState<CodeCopyOverlay | null>(null);
   const [toast, setToast] = useState('');
 
   const extensions = useMemo(
@@ -99,7 +106,6 @@ export function EditorPane({
     },
     onUpdate: ({ editor: currentEditor }) => {
       onContentChange(currentEditor.getHTML());
-      window.requestAnimationFrame(() => highlightCodeBlocks(editorShellRef.current || document));
     },
     onSelectionUpdate: ({ editor: currentEditor }) => {
       const attrs = currentEditor.getAttributes('image') as { src?: string };
@@ -171,10 +177,10 @@ export function EditorPane({
     const nextContent = note?.content || '<p></p>';
     if (editor.getHTML() !== nextContent) {
       editor.commands.setContent(nextContent, false);
-      window.requestAnimationFrame(() => highlightCodeBlocks(editorShellRef.current || document));
     }
     setImageBubble(null);
     setImageMenu(null);
+    setCodeCopyOverlay(null);
   }, [editor, note?.id, note?.content]);
 
   useEffect(() => {
@@ -185,16 +191,6 @@ export function EditorPane({
 
     const clickHandler = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
-      if (target.matches('button[data-copy-code]')) {
-        const pre = target.closest('pre') as HTMLPreElement | null;
-        if (pre) {
-          void copyCodeFromPre(pre).then(() => {
-            setToast('代码已复制');
-            window.setTimeout(() => setToast(''), 1200);
-          });
-        }
-      }
-
       if (target.tagName === 'IMG') {
         selectImageElement(target as HTMLImageElement);
         updateImageOverlay((target as HTMLImageElement).src);
@@ -230,32 +226,29 @@ export function EditorPane({
     };
   }, [selectImageElement, updateImageOverlay]);
 
-  useEffect(() => {
-    const root = editorShellRef.current;
-    if (!root) {
+  const updateCodeCopyOverlay = useCallback((event: React.MouseEvent<HTMLElement>) => {
+    const target = event.target as HTMLElement;
+    if (target.closest('[data-code-copy-overlay]')) {
       return;
     }
 
-    const ensureButtons = () => {
-      root.querySelectorAll('pre').forEach((pre) => {
-        if (pre.querySelector('[data-copy-code]')) {
-          return;
-        }
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'code-copy-button';
-        button.dataset.copyCode = 'true';
-        button.textContent = '复制';
-        pre.appendChild(button);
-      });
-      highlightCodeBlocks(root);
-    };
+    const pre = target.closest('pre') as HTMLPreElement | null;
+    if (!pre || !editorShellRef.current?.contains(pre)) {
+      setCodeCopyOverlay(null);
+      return;
+    }
 
-    ensureButtons();
-    const observer = new MutationObserver(ensureButtons);
-    observer.observe(root, { subtree: true, childList: true });
-    return () => observer.disconnect();
-  }, [editor, note?.id]);
+    const rect = pre.getBoundingClientRect();
+    const text = pre.querySelector('code')?.textContent || pre.textContent || '';
+    const next = {
+      text,
+      x: Math.max(16, Math.min(rect.right - 82, window.innerWidth - 96)),
+      y: Math.max(84, rect.top + 8),
+    };
+    setCodeCopyOverlay((current) =>
+      current && current.text === next.text && current.x === next.x && current.y === next.y ? current : next,
+    );
+  }, []);
 
   if (!note) {
     return (
@@ -270,7 +263,12 @@ export function EditorPane({
 
   function insertCodeBlock() {
     editor?.chain().focus().toggleCodeBlock({ language: codeLanguage }).run();
-    window.requestAnimationFrame(() => highlightCodeBlocks(editorShellRef.current || document));
+  }
+
+  async function copyCodeText(text: string) {
+    await navigator.clipboard.writeText(text);
+    setToast('代码已复制');
+    window.setTimeout(() => setToast(''), 1200);
   }
 
   async function copySelectedImage() {
@@ -434,6 +432,8 @@ export function EditorPane({
       <section
         ref={editorShellRef}
         className="relative min-h-0 overflow-y-auto px-8 py-6"
+        onMouseMove={updateCodeCopyOverlay}
+        onMouseLeave={() => setCodeCopyOverlay(null)}
         onDragOver={(event) => {
           if (Array.from(event.dataTransfer.items || []).some((item) => item.type.startsWith('image/'))) {
             event.preventDefault();
@@ -463,6 +463,23 @@ export function EditorPane({
       >
         <EditorContent editor={editor} />
         {toast ? <div className="fixed bottom-5 right-5 rounded-md bg-ink px-3 py-2 text-sm text-white shadow-subtle">{toast}</div> : null}
+        {codeCopyOverlay ? (
+          <button
+            type="button"
+            data-code-copy-overlay="true"
+            aria-label="复制代码"
+            title="复制代码"
+            onClick={(event) => {
+              event.stopPropagation();
+              void copyCodeText(codeCopyOverlay.text);
+            }}
+            className="fixed z-30 inline-flex h-7 items-center gap-1 rounded-md border border-white/15 bg-white/10 px-2 text-xs text-white shadow-subtle backdrop-blur transition hover:bg-white/20"
+            style={{ left: codeCopyOverlay.x, top: codeCopyOverlay.y }}
+          >
+            <Copy size={13} />
+            复制
+          </button>
+        ) : null}
         {imageBubble ? (
           <div
             className="fixed z-30 flex items-center gap-1 rounded-md border border-stone-200 bg-white p-1 shadow-subtle"
