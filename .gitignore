@@ -1,0 +1,9 @@
+node_modules
+dist
+.npm-cache
+.tmp-tests
+.DS_Store
+*.local
+.env
+.env.*
+!.env.example

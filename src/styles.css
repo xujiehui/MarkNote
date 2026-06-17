@@ -1,0 +1,221 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #fbfaf7;
+  color: #24221f;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: default;
+}
+
+::selection {
+  background: rgba(79, 111, 82, 0.22);
+}
+
+.prose-editor {
+  min-height: calc(100dvh - 170px);
+  max-width: 920px;
+  margin: 0 auto;
+  outline: none;
+  color: #24221f;
+  font-size: 16px;
+  line-height: 1.72;
+}
+
+.prose-editor > * + * {
+  margin-top: 0.78em;
+}
+
+.prose-editor h1,
+.prose-editor h2,
+.prose-editor h3 {
+  margin: 1.2em 0 0.45em;
+  line-height: 1.2;
+  font-weight: 700;
+  color: #24221f;
+}
+
+.prose-editor h1 {
+  font-size: 2rem;
+}
+
+.prose-editor h2 {
+  font-size: 1.5rem;
+}
+
+.prose-editor h3 {
+  font-size: 1.22rem;
+}
+
+.prose-editor p {
+  margin: 0.5em 0;
+}
+
+.prose-editor ul,
+.prose-editor ol {
+  padding-left: 1.5rem;
+}
+
+.prose-editor blockquote {
+  margin: 1rem 0;
+  border-left: 4px solid #4f6f52;
+  padding-left: 1rem;
+  color: #55514a;
+}
+
+.prose-editor a {
+  color: #4f6f52;
+  text-decoration: underline;
+}
+
+.prose-editor img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid rgba(36, 34, 31, 0.1);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(36, 34, 31, 0.08);
+}
+
+.prose-editor img.ProseMirror-selectednode {
+  outline: 3px solid rgba(79, 111, 82, 0.36);
+  outline-offset: 3px;
+}
+
+.prose-editor img[data-align="left"] {
+  float: left;
+  margin: 0.25rem 1.25rem 0.75rem 0;
+}
+
+.prose-editor img[data-align="right"] {
+  float: right;
+  margin: 0.25rem 0 0.75rem 1.25rem;
+}
+
+.prose-editor img[data-align="center"] {
+  float: none;
+  margin: 1rem auto;
+  clear: both;
+}
+
+.prose-editor pre {
+  position: relative;
+  margin: 1rem 0;
+  overflow-x: auto;
+  border-radius: 8px;
+  background: #1e1e1e;
+  color: #f5f5f5;
+  padding: 1rem 1rem 1rem 3.4rem;
+  line-height: 1.55;
+}
+
+.prose-editor pre code {
+  display: block;
+  min-width: 100%;
+  background: transparent;
+  color: inherit;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  white-space: pre;
+}
+
+.prose-editor pre::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2.6rem;
+  border-right: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+  pointer-events: none;
+}
+
+.prose-editor pre::after {
+  content: attr(data-line-numbers);
+  position: absolute;
+  left: 0;
+  top: 1rem;
+  width: 2.6rem;
+  color: rgba(255, 255, 255, 0.36);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  text-align: right;
+  white-space: pre;
+  user-select: none;
+  pointer-events: none;
+}
+
+.prose-editor code:not(pre code) {
+  border-radius: 4px;
+  background: #ece5da;
+  padding: 0.12rem 0.3rem;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.9em;
+}
+
+.code-copy-button {
+  position: absolute;
+  right: 0.6rem;
+  top: 0.55rem;
+  height: 1.7rem;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 0 0.55rem;
+  color: #f5f5f5;
+  font-size: 12px;
+}
+
+.code-copy-button:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  color: #9a9288;
+  pointer-events: none;
+}
+
+.pdf-export-host {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  width: 900px;
+  background: #fbfaf7;
+}
+
+@media (max-width: 1100px) {
+  .prose-editor {
+    max-width: 760px;
+  }
+}

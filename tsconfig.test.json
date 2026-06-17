@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": false,
+    "composite": false,
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "noEmit": false,
+    "outDir": ".tmp-tests",
+    "types": ["node", "jsdom"]
+  },
+  "include": ["src/**/*.ts", "tests/**/*.ts"]
+}
