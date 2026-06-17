@@ -1,7 +1,22 @@
 import assert from 'node:assert/strict';
 import 'fake-indexeddb/auto';
 import { JSDOM } from 'jsdom';
-import { createNote, db, ensureSeedNote, permanentlyDeleteNote, purgeExpiredTrash, softDeleteNote, updateNote, upsertNote } from '../src/lib/db';
+import {
+  createFolder,
+  createNote,
+  db,
+  DEFAULT_FOLDER_ID,
+  deleteFolder,
+  ensureDefaultFolders,
+  ensureSeedNote,
+  moveNoteToFolder,
+  permanentlyDeleteNote,
+  purgeExpiredTrash,
+  renameFolder,
+  softDeleteNote,
+  updateNote,
+  upsertNote,
+} from '../src/lib/db';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>');
 Object.assign(globalThis, {
@@ -17,6 +32,11 @@ async function main() {
   const seed = await db.notes.get(seedId);
   assert.equal(seed?.title, '欢迎使用 MarkNote');
   assert.equal(seed?.pinned, true);
+  assert.equal(seed?.folderId, DEFAULT_FOLDER_ID);
+
+  const defaultFolders = await db.folders.toArray();
+  assert.ok(defaultFolders.length >= 3);
+  assert.ok(defaultFolders.some((folder) => folder.id === DEFAULT_FOLDER_ID));
 
   const note = await createNote({
     title: '搜索测试',
@@ -24,6 +44,20 @@ async function main() {
     tags: ['工作'],
   });
   assert.equal(note.rawContent, 'Hello IndexedDB body');
+  assert.equal(note.folderId, DEFAULT_FOLDER_ID);
+
+  const folder = await createFolder('项目资料');
+  assert.equal(folder.name, '项目资料');
+  await renameFolder(folder.id, '项目归档');
+  assert.equal((await db.folders.get(folder.id))?.name, '项目归档');
+  await moveNoteToFolder(note.id, folder.id);
+  assert.equal((await db.notes.get(note.id))?.folderId, folder.id);
+  await deleteFolder(folder.id);
+  assert.equal(await db.folders.get(folder.id), undefined);
+  assert.equal((await db.notes.get(note.id))?.folderId, DEFAULT_FOLDER_ID);
+
+  await ensureDefaultFolders();
+  assert.ok(await db.folders.get(DEFAULT_FOLDER_ID));
 
   await updateNote(note.id, { content: '<p>updated content</p>' });
   const updated = await db.notes.get(note.id);

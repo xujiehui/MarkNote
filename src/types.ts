@@ -3,11 +3,20 @@ export interface Note {
   title: string;
   content: string;
   rawContent?: string;
+  folderId: string;
   createdAt: number;
   updatedAt: number;
   tags: string[];
   pinned: boolean;
   deletedAt?: number | null;
+}
+
+export interface Folder {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  sortOrder: number;
 }
 
 export interface ImageAttachment {
@@ -19,7 +28,7 @@ export interface ImageAttachment {
 
 export type ExportFormat = 'html' | 'pdf' | 'markdown' | 'json';
 
-export type TagFilter = 'all' | 'trash' | string;
+export type WorkspaceFilter = 'all' | 'trash' | `folder:${string}` | `tag:${string}`;
 
 export interface ImportResult {
   title: string;

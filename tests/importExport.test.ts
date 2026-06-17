@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { parseImportFile, noteToMarkdown } from '../src/lib/importExport';
+import { DEFAULT_FOLDER_ID } from '../src/lib/db';
 import { noteHtmlDocument } from '../src/lib/html';
 import type { Note } from '../src/types';
 
@@ -43,6 +44,7 @@ console.log('ok')
     title: '导出标题',
     content: result.content,
     rawContent: '',
+    folderId: DEFAULT_FOLDER_ID,
     createdAt: 1,
     updatedAt: 2,
     tags: ['代码片段'],
@@ -70,6 +72,7 @@ console.log('ok')
             title: '完整备份',
             content: '<p>restore me</p>',
             rawContent: 'restore me',
+            folderId: 'folder-work',
             createdAt: 10,
             updatedAt: 20,
             tags: ['工作'],
@@ -88,7 +91,30 @@ console.log('ok')
   assert.equal(restored.note?.createdAt, 10);
   assert.equal(restored.note?.updatedAt, 20);
   assert.equal(restored.note?.deletedAt, 30);
+  assert.equal(restored.note?.folderId, 'folder-work');
   assert.deepEqual(restored.note?.tags, ['工作']);
+
+  const legacyBackup = new File(
+    [
+      JSON.stringify({
+        notes: [
+          {
+            id: 'legacy-note',
+            title: '旧备份',
+            content: '<p>legacy</p>',
+            createdAt: 10,
+            updatedAt: 20,
+            tags: [],
+            pinned: false,
+          },
+        ],
+      }),
+    ],
+    'legacy.json',
+    { type: 'application/json' },
+  );
+  const [legacy] = await parseImportFile(legacyBackup);
+  assert.equal(legacy.note?.folderId, DEFAULT_FOLDER_ID);
 
   console.log('import/export tests passed');
 }

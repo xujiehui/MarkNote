@@ -1,6 +1,6 @@
-import { Pin, Tags, Trash2 } from 'lucide-react';
+import { Folder, Pin, Tags, Trash2 } from 'lucide-react';
 import { DEFAULT_TAGS } from '../lib/db';
-import type { Note } from '../types';
+import type { Folder as NoteFolder, Note } from '../types';
 
 interface ContextMenuState {
   note: Note;
@@ -10,13 +10,15 @@ interface ContextMenuState {
 
 interface ContextMenuProps {
   state: ContextMenuState;
+  folders: NoteFolder[];
   onClose: () => void;
   onTogglePin: (note: Note) => void;
   onDelete: (note: Note) => void;
   onToggleTag: (note: Note, tag: string) => void;
+  onMoveToFolder: (note: Note, folderId: string) => void;
 }
 
-export function ContextMenu({ state, onTogglePin, onDelete, onToggleTag }: ContextMenuProps) {
+export function ContextMenu({ state, folders, onTogglePin, onDelete, onToggleTag, onMoveToFolder }: ContextMenuProps) {
   const { note, x, y } = state;
   return (
     <div
@@ -31,6 +33,23 @@ export function ContextMenu({ state, onTogglePin, onDelete, onToggleTag }: Conte
         <Pin size={15} />
         {note.pinned ? '取消置顶' : '置顶'}
       </button>
+      <div className="border-t border-stone-100 py-1">
+        <div className="flex h-7 items-center gap-2 px-3 text-xs font-medium text-stone-500">
+          <Folder size={13} />
+          移动到文件夹
+        </div>
+        {folders.map((folder) => (
+          <button
+            key={folder.id}
+            type="button"
+            onClick={() => onMoveToFolder(note, folder.id)}
+            className="flex h-8 w-full items-center justify-between px-3 text-left text-stone-700 hover:bg-stone-100"
+          >
+            <span className="truncate">{folder.name}</span>
+            {note.folderId === folder.id ? <span className="h-2 w-2 rounded-full bg-moss" /> : null}
+          </button>
+        ))}
+      </div>
       <div className="border-t border-stone-100 py-1">
         <div className="flex h-7 items-center gap-2 px-3 text-xs font-medium text-stone-500">
           <Tags size={13} />

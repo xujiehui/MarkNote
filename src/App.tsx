@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import type { Note, ExportFormat, TagFilter } from './types';
+import type { Folder, Note, ExportFormat, WorkspaceFilter } from './types';
 import {
+  createFolder,
   createNote,
   db,
+  DEFAULT_FOLDER_ID,
+  deleteFolder,
   ensureSeedNote,
+  moveNoteToFolder,
   permanentlyDeleteNote,
   purgeExpiredTrash,
+  renameFolder,
   restoreNote,
   softDeleteNote,
   upsertNote,
@@ -31,10 +36,11 @@ interface ContextState {
 type SaveState = 'idle' | 'saving' | 'saved';
 
 function NoteWorkspace() {
+  const folders = useLiveQuery(() => db.folders.orderBy('sortOrder').toArray(), [], []);
   const notes = useLiveQuery(() => db.notes.toArray(), [], []);
   const [activeNoteId, setActiveNoteId] = useState<string>('');
   const [query, setQuery] = useState('');
-  const [activeFilter, setActiveFilter] = useState<TagFilter>('all');
+  const [activeFilter, setActiveFilter] = useState<WorkspaceFilter>(`folder:${DEFAULT_FOLDER_ID}`);
   const [contextMenu, setContextMenu] = useState<ContextState | null>(null);
   const [showImport, setShowImport] = useState(false);
   const [showExport, setShowExport] = useState(false);
@@ -45,11 +51,23 @@ function NoteWorkspace() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const debouncedQuery = useDebouncedValue(query, 180);
   const activeNote = notes.find((note) => note.id === activeNoteId);
+  const activeFolderId = activeFilter.startsWith('folder:') ? activeFilter.slice('folder:'.length) : DEFAULT_FOLDER_ID;
+  const activeFolder = folders.find((folder) => folder.id === activeFolderId) || folders[0];
 
   useEffect(() => {
     void purgeExpiredTrash();
     void ensureSeedNote().then((id) => setActiveNoteId((current) => current || id));
   }, []);
+
+  useEffect(() => {
+    if (!activeFilter.startsWith('folder:') || folders.length === 0) {
+      return;
+    }
+    const folderId = activeFilter.slice('folder:'.length);
+    if (!folders.some((folder) => folder.id === folderId)) {
+      setActiveFilter(`folder:${DEFAULT_FOLDER_ID}`);
+    }
+  }, [activeFilter, folders]);
 
   useEffect(() => {
     if (!activeNote) {
@@ -102,7 +120,10 @@ function NoteWorkspace() {
       if (inTrash) {
         return false;
       }
-      if (activeFilter !== 'all' && !note.tags.includes(activeFilter)) {
+      if (activeFilter.startsWith('folder:') && note.folderId !== activeFilter.slice('folder:'.length)) {
+        return false;
+      }
+      if (activeFilter.startsWith('tag:') && !note.tags.includes(activeFilter.slice('tag:'.length))) {
         return false;
       }
       return noteMatches(note, debouncedQuery);
@@ -110,6 +131,30 @@ function NoteWorkspace() {
   }, [sortedNotes, activeFilter, debouncedQuery]);
 
   const trashCount = useMemo(() => notes.filter((note) => note.deletedAt).length, [notes]);
+  const folderCounts = useMemo(() => {
+    return notes.reduce<Record<string, number>>((counts, note) => {
+      if (!note.deletedAt) {
+        counts[note.folderId] = (counts[note.folderId] || 0) + 1;
+      }
+      return counts;
+    }, {});
+  }, [notes]);
+
+  const listTitle = useMemo(() => {
+    if (activeFilter === 'all') {
+      return '全部笔记';
+    }
+    if (activeFilter === 'trash') {
+      return '回收站';
+    }
+    if (activeFilter.startsWith('folder:')) {
+      return activeFolder?.name || '文件夹';
+    }
+    if (activeFilter.startsWith('tag:')) {
+      return `# ${activeFilter.slice('tag:'.length)}`;
+    }
+    return '笔记';
+  }, [activeFilter, activeFolder?.name]);
 
   useEffect(() => {
     if (activeNoteId && visibleNotes.some((note) => note.id === activeNoteId)) {
@@ -143,10 +188,11 @@ function NoteWorkspace() {
   }, [activeNoteId, draftTitle, draftContent]);
 
   const createNewNote = useCallback(async () => {
-    const note = await createNote({ title: '未命名笔记', content: '<p></p>' });
-    setActiveFilter('all');
+    const folderId = activeFilter.startsWith('folder:') ? activeFilter.slice('folder:'.length) : DEFAULT_FOLDER_ID;
+    const note = await createNote({ title: '未命名笔记', content: '<p></p>', folderId });
+    setActiveFilter(`folder:${folderId}`);
     setActiveNoteId(note.id);
-  }, []);
+  }, [activeFilter]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -232,13 +278,44 @@ function NoteWorkspace() {
           title: item.note?.title || item.title,
           content,
           rawContent: stripHtml(content),
+          folderId: activeFolderId,
           tags: item.note?.tags || item.tags || [],
         };
         const note = item.note ? await upsertNote(noteInput) : await createNote(noteInput);
-        setActiveFilter('all');
+        setActiveFilter(`folder:${activeFolderId}`);
         setActiveNoteId(note.id);
       }
     }
+  }
+
+  async function handleCreateFolder() {
+    const folder = await createFolder('新建文件夹');
+    setActiveFilter(`folder:${folder.id}`);
+  }
+
+  async function handleRenameFolder(folder: Folder) {
+    const name = window.prompt('文件夹名称', folder.name);
+    if (name === null) {
+      return;
+    }
+    await renameFolder(folder.id, name);
+  }
+
+  async function handleDeleteFolder(folder: Folder) {
+    if (folder.id === DEFAULT_FOLDER_ID) {
+      return;
+    }
+    const ok = window.confirm(`删除“${folder.name}”？其中的笔记会移动到“资料库”。`);
+    if (!ok) {
+      return;
+    }
+    await deleteFolder(folder.id);
+    setActiveFilter(`folder:${DEFAULT_FOLDER_ID}`);
+  }
+
+  async function handleMoveNoteToFolder(note: Note, folderId: string) {
+    await moveNoteToFolder(note.id, folderId);
+    setContextMenu(null);
   }
 
   async function handleExport(format: ExportFormat) {
@@ -286,10 +363,16 @@ function NoteWorkspace() {
       <div className="flex h-full">
         <Sidebar
           query={query}
+          folders={folders}
           activeFilter={activeFilter}
+          activeFolderId={activeFolderId}
+          folderCounts={folderCounts}
           trashCount={trashCount}
           onQueryChange={setQuery}
           onFilterChange={setActiveFilter}
+          onCreateFolder={() => void handleCreateFolder()}
+          onRenameFolder={(folder) => void handleRenameFolder(folder)}
+          onDeleteFolder={(folder) => void handleDeleteFolder(folder)}
           onCreateNote={() => void createNewNote()}
           onImportClick={() => setShowImport(true)}
           onExportClick={() => setShowExport((value) => !value)}
@@ -297,7 +380,9 @@ function NoteWorkspace() {
         />
         <NoteList
           notes={visibleNotes}
+          folders={folders}
           activeNoteId={activeNoteId}
+          title={listTitle}
           isTrash={activeFilter === 'trash'}
           onSelectNote={setActiveNoteId}
           onContextMenu={(event, note) => {
@@ -324,10 +409,12 @@ function NoteWorkspace() {
       {contextMenu ? (
         <ContextMenu
           state={contextMenu}
+          folders={folders}
           onClose={() => setContextMenu(null)}
           onTogglePin={(note) => void togglePin(note)}
           onDelete={(note) => void handleDelete(note)}
           onToggleTag={(note, tag) => void toggleTag(note, tag)}
+          onMoveToFolder={(note, folderId) => void handleMoveNoteToFolder(note, folderId)}
         />
       ) : null}
       {showImport ? <ImportDialog onClose={() => setShowImport(false)} onImportFiles={handleImport} /> : null}

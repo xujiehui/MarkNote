@@ -1,12 +1,14 @@
 import { FixedSizeList as VirtualList } from 'react-window';
-import { Pin, MoreVertical, Trash2, RotateCcw } from 'lucide-react';
-import type { Note } from '../types';
+import { Folder, Pin, MoreVertical, Trash2, RotateCcw } from 'lucide-react';
+import type { Folder as NoteFolder, Note } from '../types';
 import { formatUpdatedAt } from '../lib/date';
 import { getPreview } from '../lib/html';
 
 interface NoteListProps {
   notes: Note[];
+  folders: NoteFolder[];
   activeNoteId?: string;
+  title: string;
   isTrash: boolean;
   onSelectNote: (id: string) => void;
   onContextMenu: (event: React.MouseEvent, note: Note) => void;
@@ -16,7 +18,9 @@ interface NoteListProps {
 
 export function NoteList({
   notes,
+  folders,
   activeNoteId,
+  title,
   isTrash,
   onSelectNote,
   onContextMenu,
@@ -27,7 +31,7 @@ export function NoteList({
     <section className="grid h-full w-[300px] shrink-0 grid-rows-[auto_1fr] border-r border-stone-200 bg-paper">
       <header className="flex h-[73px] items-end justify-between border-b border-stone-200 px-4 pb-4">
         <div>
-          <h2 className="text-base font-semibold text-ink">{isTrash ? '回收站' : '笔记'}</h2>
+          <h2 className="text-base font-semibold text-ink">{title}</h2>
           <p className="text-xs text-stone-500">{notes.length} 条记录</p>
         </div>
       </header>
@@ -41,6 +45,7 @@ export function NoteList({
           {({ index, style }) => {
             const note = notes[index];
             const active = note.id === activeNoteId;
+            const folder = folders.find((item) => item.id === note.folderId);
             return (
               <div style={style}>
                 <article
@@ -90,7 +95,13 @@ export function NoteList({
                         </button>
                       </span>
                     ) : (
-                      <span className="flex gap-1">
+                      <span className="flex min-w-0 items-center gap-1">
+                        {folder ? (
+                          <span className="flex min-w-0 items-center gap-1 rounded bg-linen px-1.5 py-0.5 text-[11px] text-stone-500">
+                            <Folder size={11} />
+                            <span className="max-w-[72px] truncate">{folder.name}</span>
+                          </span>
+                        ) : null}
                         {note.tags.slice(0, 2).map((tag) => (
                           <span key={tag} className="rounded bg-linen px-1.5 py-0.5 text-[11px] text-stone-500">
                             {tag}

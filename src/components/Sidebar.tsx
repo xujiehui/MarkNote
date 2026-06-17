@@ -1,6 +1,8 @@
 import {
   ArchiveRestore,
   Download,
+  Edit3,
+  Folder,
   FolderOpen,
   Import,
   Plus,
@@ -8,15 +10,21 @@ import {
   Tag,
   Trash2,
 } from 'lucide-react';
-import { DEFAULT_TAGS } from '../lib/db';
-import type { TagFilter } from '../types';
+import { DEFAULT_FOLDER_ID, DEFAULT_TAGS } from '../lib/db';
+import type { Folder as NoteFolder, WorkspaceFilter } from '../types';
 
 interface SidebarProps {
   query: string;
-  activeFilter: TagFilter;
+  folders: NoteFolder[];
+  activeFilter: WorkspaceFilter;
+  activeFolderId: string;
+  folderCounts: Record<string, number>;
   trashCount: number;
   onQueryChange: (value: string) => void;
-  onFilterChange: (value: TagFilter) => void;
+  onFilterChange: (value: WorkspaceFilter) => void;
+  onCreateFolder: () => void;
+  onRenameFolder: (folder: NoteFolder) => void;
+  onDeleteFolder: (folder: NoteFolder) => void;
   onCreateNote: () => void;
   onImportClick: () => void;
   onExportClick: () => void;
@@ -25,10 +33,16 @@ interface SidebarProps {
 
 export function Sidebar({
   query,
+  folders,
   activeFilter,
+  activeFolderId,
+  folderCounts,
   trashCount,
   onQueryChange,
   onFilterChange,
+  onCreateFolder,
+  onRenameFolder,
+  onDeleteFolder,
   onCreateNote,
   onImportClick,
   onExportClick,
@@ -69,15 +83,70 @@ export function Sidebar({
           全部笔记
         </button>
 
+        <div className="mb-2 flex items-center justify-between px-2 text-xs font-semibold uppercase tracking-wide text-stone-500">
+          <span>文件夹</span>
+          <button
+            type="button"
+            onClick={onCreateFolder}
+            className="grid h-6 w-6 place-items-center rounded text-stone-500 hover:bg-white hover:text-ink"
+            aria-label="新建文件夹"
+            title="新建文件夹"
+          >
+            <Plus size={13} />
+          </button>
+        </div>
+        <div className="mb-5 space-y-1">
+          {folders.map((folder) => {
+            const active = activeFilter === `folder:${folder.id}`;
+            return (
+              <div key={folder.id} className="group flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => onFilterChange(`folder:${folder.id}`)}
+                  className={`flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md px-3 text-left text-sm transition ${
+                    active ? 'bg-white text-ink shadow-subtle' : 'text-stone-600 hover:bg-white/70'
+                  }`}
+                >
+                  {active ? <FolderOpen size={15} /> : <Folder size={15} />}
+                  <span className="min-w-0 flex-1 truncate">{folder.name}</span>
+                  <span className="text-xs text-stone-400">{folderCounts[folder.id] || 0}</span>
+                </button>
+                {folder.id === activeFolderId ? (
+                  <button
+                    type="button"
+                    onClick={() => onRenameFolder(folder)}
+                    className="grid h-7 w-7 place-items-center rounded text-stone-400 hover:bg-white hover:text-ink"
+                    aria-label="重命名文件夹"
+                    title="重命名文件夹"
+                  >
+                    <Edit3 size={13} />
+                  </button>
+                ) : null}
+                {folder.id === activeFolderId && folder.id !== DEFAULT_FOLDER_ID ? (
+                  <button
+                    type="button"
+                    onClick={() => onDeleteFolder(folder)}
+                    className="grid h-7 w-7 place-items-center rounded text-stone-400 hover:bg-white hover:text-clay"
+                    aria-label="删除文件夹"
+                    title="删除文件夹"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+
         <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-stone-500">标签</div>
         <div className="space-y-1">
           {DEFAULT_TAGS.map((tag) => (
             <button
               key={tag}
               type="button"
-              onClick={() => onFilterChange(tag)}
+              onClick={() => onFilterChange(`tag:${tag}`)}
               className={`flex h-9 w-full items-center gap-2 rounded-md px-3 text-left text-sm transition ${
-                activeFilter === tag ? 'bg-white text-ink shadow-subtle' : 'text-stone-600 hover:bg-white/70'
+                activeFilter === `tag:${tag}` ? 'bg-white text-ink shadow-subtle' : 'text-stone-600 hover:bg-white/70'
               }`}
             >
               <Tag size={15} />
