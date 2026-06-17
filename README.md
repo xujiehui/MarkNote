@@ -21,6 +21,37 @@ npm test
 npm run build
 ```
 
+## Desktop App
+
+```bash
+npm run desktop:build
+npm run desktop:pack
+npm run dist:mac
+npm run dist:win
+```
+
+`desktop:pack` creates an unpacked app under `release/mac/MarkNote.app` on macOS. `dist:mac` creates distributable macOS archives. `dist:win` is configured for Windows NSIS and portable builds and should be run on Windows or a CI runner with Windows packaging support.
+
+Current macOS outputs:
+
+- `release/mac/MarkNote.app`
+- `release/MarkNote-0.1.0.dmg`
+- `release/MarkNote-0.1.0-mac.zip`
+
+The local macOS build is unsigned because no valid Developer ID certificate is available in this environment. For public distribution, sign and notarize with an active Apple Developer ID certificate.
+
+## GitHub Actions Packaging
+
+The repository includes `.github/workflows/desktop-build.yml`.
+
+It runs on pushes, pull requests, version tags (`v*`), and manual workflow dispatch. The workflow builds and uploads:
+
+- macOS Intel artifacts from `macos-15-intel`
+- macOS Apple Silicon artifacts from `macos-15`
+- Windows x64 artifacts from `windows-latest`
+
+Artifacts are available from the workflow run page for 14 days.
+
 ## Features
 
 - Three-column note workspace with a 240px sidebar and 300px virtualized note list.

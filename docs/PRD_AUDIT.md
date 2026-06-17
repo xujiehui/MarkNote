@@ -4,9 +4,12 @@ This audit maps the requested PRD to current implementation evidence.
 
 ## Delivery Shape
 
-- Cross-platform delivery: implemented as a PWA that runs on macOS and Windows in modern browsers.
+- Cross-platform delivery: implemented as a PWA and Electron desktop app.
+- macOS desktop artifacts generated under `release/`: `MarkNote.app`, `MarkNote-0.1.0.dmg`, and `MarkNote-0.1.0-mac.zip`.
+- Windows desktop build scripts are configured through electron-builder: `npm run dist:win`.
 - Local install path: documented in `README.md`.
 - PWA assets: `public/manifest.webmanifest`, `public/sw.js`, and service worker registration in `src/main.tsx`.
+- Electron main/preload process: `electron/main.ts`, `electron/preload.cts`, `tsconfig.electron.json`.
 
 ## Technology Stack
 
@@ -79,15 +82,18 @@ Latest verified commands:
 ```bash
 npm run lint
 npm test
-npm run build
+npm run desktop:build
+npm run dist:mac
 npm audit
 ```
 
 Current audit status: `found 0 vulnerabilities`.
 Latest build confirms separate lazy chunks for `importExport`, `html2canvas`, and `jspdf`.
+Packaged app launch check: `open release/mac/MarkNote.app` succeeded, and System Events reported a running `MarkNote` process.
 
 ## Known Caveats
 
-- This is delivered as a PWA, not a native Electron/Tauri packaged desktop app.
+- macOS artifacts are unsigned because no valid Developer ID certificate is available in this environment. Public distribution requires signing and notarization.
+- Windows artifacts are configured but not built in this macOS environment; run `npm run dist:win` on Windows or Windows CI.
 - Browser automation was intermittently unstable in the Codex in-app browser, so final validation relies on command-level tests, build output, audit output, and HTTP 200 checks from the local dev server.
 - The main app chunk is still larger than ideal because the rich editor stack loads on first screen, but export/PDF-heavy dependencies are split into lazy chunks.
