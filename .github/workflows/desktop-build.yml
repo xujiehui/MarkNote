@@ -48,7 +48,7 @@ jobs:
         include:
           - name: macOS Intel
             os: macos-15-intel
-            script: dist:mac:x64
+            script: package:mac:x64
             artifact: marknote-macos-intel
             patterns: |
               release/*.dmg
@@ -57,7 +57,7 @@ jobs:
               release/latest-mac.yml
           - name: macOS Apple Silicon
             os: macos-15
-            script: dist:mac:arm64
+            script: package:mac:arm64
             artifact: marknote-macos-apple-silicon
             patterns: |
               release/*.dmg
@@ -66,7 +66,7 @@ jobs:
               release/latest-mac.yml
           - name: Windows x64
             os: windows-latest
-            script: dist:win:x64
+            script: package:win:x64
             artifact: marknote-windows-x64
             patterns: |
               release/*.exe
@@ -86,12 +86,31 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build desktop package
+      - name: Show runner environment
+        shell: bash
+        run: |
+          node --version
+          npm --version
+          uname -a || true
+          node -p "process.platform + ' ' + process.arch"
+
+      - name: Build renderer and Electron main process
+        run: npm run desktop:build
+
+      - name: Package desktop app
         run: npm run ${{ matrix.script }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
           ELECTRON_BUILDER_CACHE: ${{ runner.temp }}/electron-builder-cache
           ELECTRON_CACHE: ${{ runner.temp }}/electron-cache
+
+      - name: List package outputs
+        if: always()
+        shell: bash
+        run: |
+          pwd
+          find release -maxdepth 3 -print || true
+          find "$RUNNER_TEMP" -maxdepth 3 \( -name '*.zip' -o -name '*.dmg' -o -name '*.exe' \) -print 2>/dev/null || true
 
       - name: Upload package artifacts
         uses: actions/upload-artifact@v4
