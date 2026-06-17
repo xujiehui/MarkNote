@@ -2,13 +2,13 @@
   "name": "MarkNote",
   "short_name": "MarkNote",
   "description": "A cross-platform rich note workspace for text, images, and code.",
-  "start_url": "/",
+  "start_url": "./?app=1",
   "display": "standalone",
   "background_color": "#fbfaf7",
   "theme_color": "#f4efe7",
   "icons": [
     {
-      "src": "/marknote.svg",
+      "src": "./marknote.svg",
       "sizes": "64x64",
       "type": "image/svg+xml",
       "purpose": "any maskable"

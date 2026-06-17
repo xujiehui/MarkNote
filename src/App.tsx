@@ -20,6 +20,7 @@ import { EditorPane } from './components/EditorPane';
 import { ContextMenu } from './components/ContextMenu';
 import { ImportDialog } from './components/ImportDialog';
 import { ExportMenu } from './components/ExportMenu';
+import { LandingPage } from './LandingPage';
 
 interface ContextState {
   note: Note;
@@ -29,7 +30,7 @@ interface ContextState {
 
 type SaveState = 'idle' | 'saving' | 'saved';
 
-export default function App() {
+function NoteWorkspace() {
   const notes = useLiveQuery(() => db.notes.toArray(), [], []);
   const [activeNoteId, setActiveNoteId] = useState<string>('');
   const [query, setQuery] = useState('');
@@ -333,4 +334,13 @@ export default function App() {
       {showExport ? <ExportMenu onClose={() => setShowExport(false)} onExport={(format) => void handleExport(format)} /> : null}
     </div>
   );
+}
+
+function shouldOpenWorkspace() {
+  const params = new URLSearchParams(window.location.search);
+  return params.get('app') === '1' || window.location.hash === '#app';
+}
+
+export default function App() {
+  return shouldOpenWorkspace() ? <NoteWorkspace /> : <LandingPage />;
 }

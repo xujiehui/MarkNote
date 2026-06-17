@@ -1,6 +1,6 @@
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open('marknote-v1').then((cache) => cache.addAll(['/', '/index.html', '/manifest.webmanifest', '/marknote.svg'])),
+    caches.open('marknote-v2').then((cache) => cache.addAll(['./', './index.html', './manifest.webmanifest', './marknote.svg'])),
   );
   self.skipWaiting();
 });
@@ -15,6 +15,6 @@ self.addEventListener('fetch', (event) => {
   }
 
   event.respondWith(
-    caches.match(event.request).then((cached) => cached || fetch(event.request).catch(() => caches.match('/index.html'))),
+    caches.match(event.request).then((cached) => cached || fetch(event.request).catch(() => caches.match('./index.html'))),
   );
 });

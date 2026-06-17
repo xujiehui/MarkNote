@@ -33,10 +33,12 @@ function createWindow() {
   });
 
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
-    void window.loadURL(process.env.VITE_DEV_SERVER_URL);
+    const url = new URL(process.env.VITE_DEV_SERVER_URL);
+    url.searchParams.set('app', '1');
+    void window.loadURL(url.toString());
     window.webContents.openDevTools({ mode: 'detach' });
   } else {
-    void window.loadFile(path.join(__dirname, '../dist/index.html'));
+    void window.loadFile(path.join(__dirname, '../dist/index.html'), { search: 'app=1' });
   }
 }
 
