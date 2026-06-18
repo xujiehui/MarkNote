@@ -74,6 +74,7 @@ export function EditorPane({
   const [imageBubble, setImageBubble] = useState<ImageBubble | null>(null);
   const [imageMenu, setImageMenu] = useState<ImageMenu | null>(null);
   const [codeCopyOverlay, setCodeCopyOverlay] = useState<CodeCopyOverlay | null>(null);
+  const [isImageDragOver, setIsImageDragOver] = useState(false);
   const [toast, setToast] = useState('');
 
   const extensions = useMemo(
@@ -181,6 +182,7 @@ export function EditorPane({
     setImageBubble(null);
     setImageMenu(null);
     setCodeCopyOverlay(null);
+    setIsImageDragOver(false);
   }, [editor, note?.id, note?.content]);
 
   useEffect(() => {
@@ -431,18 +433,31 @@ export function EditorPane({
 
       <section
         ref={editorShellRef}
-        className="relative min-h-0 overflow-y-auto px-8 py-6"
+        className={`relative min-h-0 overflow-y-auto px-8 py-6 transition ${
+          isImageDragOver ? 'ring-2 ring-inset ring-moss/35' : ''
+        }`}
         onMouseMove={updateCodeCopyOverlay}
-        onMouseLeave={() => setCodeCopyOverlay(null)}
+        onMouseLeave={() => {
+          setCodeCopyOverlay(null);
+          setIsImageDragOver(false);
+        }}
         onDragOver={(event) => {
           if (Array.from(event.dataTransfer.items || []).some((item) => item.type.startsWith('image/'))) {
             event.preventDefault();
+            setIsImageDragOver(true);
+          }
+        }}
+        onDragLeave={(event) => {
+          const nextTarget = event.relatedTarget instanceof Node ? event.relatedTarget : null;
+          if (!event.currentTarget.contains(nextTarget)) {
+            setIsImageDragOver(false);
           }
         }}
         onDrop={(event) => {
           const files = Array.from(event.dataTransfer.files || []).filter((file) => file.type.startsWith('image/'));
           if (files.length > 0) {
             event.preventDefault();
+            setIsImageDragOver(false);
             void insertImageFiles(files);
           }
         }}

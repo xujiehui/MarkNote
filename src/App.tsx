@@ -23,12 +23,19 @@ import { Sidebar } from './components/Sidebar';
 import { NoteList } from './components/NoteList';
 import { EditorPane } from './components/EditorPane';
 import { ContextMenu } from './components/ContextMenu';
+import { FolderContextMenu } from './components/FolderContextMenu';
 import { ImportDialog } from './components/ImportDialog';
 import { ExportMenu } from './components/ExportMenu';
 import { LandingPage } from './LandingPage';
 
 interface ContextState {
   note: Note;
+  x: number;
+  y: number;
+}
+
+interface FolderContextState {
+  folder: Folder;
   x: number;
   y: number;
 }
@@ -42,8 +49,11 @@ function NoteWorkspace() {
   const [query, setQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<WorkspaceFilter>(`folder:${DEFAULT_FOLDER_ID}`);
   const [contextMenu, setContextMenu] = useState<ContextState | null>(null);
+  const [folderContextMenu, setFolderContextMenu] = useState<FolderContextState | null>(null);
   const [showImport, setShowImport] = useState(false);
   const [showExport, setShowExport] = useState(false);
+  const [editingFolderId, setEditingFolderId] = useState('');
+  const [editingFolderName, setEditingFolderName] = useState('');
   const [draftTitle, setDraftTitle] = useState('');
   const [draftContent, setDraftContent] = useState('');
   const [dirty, setDirty] = useState(false);
@@ -68,6 +78,14 @@ function NoteWorkspace() {
       setActiveFilter(`folder:${DEFAULT_FOLDER_ID}`);
     }
   }, [activeFilter, folders]);
+
+  useEffect(() => {
+    if (!editingFolderId || folders.some((folder) => folder.id === editingFolderId)) {
+      return;
+    }
+    setEditingFolderId('');
+    setEditingFolderName('');
+  }, [editingFolderId, folders]);
 
   useEffect(() => {
     if (!activeNote) {
@@ -166,11 +184,28 @@ function NoteWorkspace() {
   useEffect(() => {
     function closeMenus() {
       setContextMenu(null);
+      setFolderContextMenu(null);
       setShowExport(false);
     }
 
     window.addEventListener('click', closeMenus);
     return () => window.removeEventListener('click', closeMenus);
+  }, []);
+
+  useEffect(() => {
+    function closeMenusOnEscape(event: KeyboardEvent) {
+      if (event.key !== 'Escape') {
+        return;
+      }
+      setContextMenu(null);
+      setFolderContextMenu(null);
+      setShowExport(false);
+      setEditingFolderId('');
+      setEditingFolderName('');
+    }
+
+    window.addEventListener('keydown', closeMenusOnEscape);
+    return () => window.removeEventListener('keydown', closeMenusOnEscape);
   }, []);
 
   const manualSave = useCallback(async () => {
@@ -291,26 +326,49 @@ function NoteWorkspace() {
   async function handleCreateFolder() {
     const folder = await createFolder('新建文件夹');
     setActiveFilter(`folder:${folder.id}`);
+    setFolderContextMenu(null);
+    setEditingFolderId(folder.id);
+    setEditingFolderName(folder.name);
   }
 
-  async function handleRenameFolder(folder: Folder) {
-    const name = window.prompt('文件夹名称', folder.name);
-    if (name === null) {
+  function handleStartRenameFolder(folder: Folder) {
+    setActiveFilter(`folder:${folder.id}`);
+    setFolderContextMenu(null);
+    setEditingFolderId(folder.id);
+    setEditingFolderName(folder.name);
+  }
+
+  async function handleCommitFolderRename() {
+    if (!editingFolderId) {
       return;
     }
-    await renameFolder(folder.id, name);
+
+    const name = editingFolderName.trim();
+    if (name) {
+      await renameFolder(editingFolderId, name);
+    }
+    setEditingFolderId('');
+    setEditingFolderName('');
+  }
+
+  function handleCancelFolderRename() {
+    setEditingFolderId('');
+    setEditingFolderName('');
   }
 
   async function handleDeleteFolder(folder: Folder) {
     if (folder.id === DEFAULT_FOLDER_ID) {
+      setFolderContextMenu(null);
       return;
     }
     const ok = window.confirm(`删除“${folder.name}”？其中的笔记会移动到“资料库”。`);
     if (!ok) {
+      setFolderContextMenu(null);
       return;
     }
     await deleteFolder(folder.id);
     setActiveFilter(`folder:${DEFAULT_FOLDER_ID}`);
+    setFolderContextMenu(null);
   }
 
   async function handleMoveNoteToFolder(note: Note, folderId: string) {
@@ -365,14 +423,24 @@ function NoteWorkspace() {
           query={query}
           folders={folders}
           activeFilter={activeFilter}
-          activeFolderId={activeFolderId}
           folderCounts={folderCounts}
           trashCount={trashCount}
           onQueryChange={setQuery}
           onFilterChange={setActiveFilter}
           onCreateFolder={() => void handleCreateFolder()}
-          onRenameFolder={(folder) => void handleRenameFolder(folder)}
-          onDeleteFolder={(folder) => void handleDeleteFolder(folder)}
+          editingFolderId={editingFolderId}
+          editingFolderName={editingFolderName}
+          onEditingFolderNameChange={setEditingFolderName}
+          onCommitFolderRename={() => void handleCommitFolderRename()}
+          onCancelFolderRename={handleCancelFolderRename}
+          onFolderContextMenu={(event, folder) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setContextMenu(null);
+            setShowExport(false);
+            setActiveFilter(`folder:${folder.id}`);
+            setFolderContextMenu({ folder, x: event.clientX, y: event.clientY });
+          }}
           onCreateNote={() => void createNewNote()}
           onImportClick={() => setShowImport(true)}
           onExportClick={() => setShowExport((value) => !value)}
@@ -387,6 +455,8 @@ function NoteWorkspace() {
           onSelectNote={setActiveNoteId}
           onContextMenu={(event, note) => {
             event.preventDefault();
+            setFolderContextMenu(null);
+            setShowExport(false);
             setContextMenu({ note, x: event.clientX, y: event.clientY });
           }}
           onRestoreNote={(id) => void restoreNote(id)}
@@ -415,6 +485,14 @@ function NoteWorkspace() {
           onDelete={(note) => void handleDelete(note)}
           onToggleTag={(note, tag) => void toggleTag(note, tag)}
           onMoveToFolder={(note, folderId) => void handleMoveNoteToFolder(note, folderId)}
+        />
+      ) : null}
+      {folderContextMenu ? (
+        <FolderContextMenu
+          state={folderContextMenu}
+          onCreateFolder={() => void handleCreateFolder()}
+          onRenameFolder={handleStartRenameFolder}
+          onDeleteFolder={(folder) => void handleDeleteFolder(folder)}
         />
       ) : null}
       {showImport ? <ImportDialog onClose={() => setShowImport(false)} onImportFiles={handleImport} /> : null}

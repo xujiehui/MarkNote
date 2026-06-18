@@ -1,7 +1,6 @@
 import {
   ArchiveRestore,
   Download,
-  Edit3,
   Folder,
   FolderOpen,
   Import,
@@ -10,43 +9,49 @@ import {
   Tag,
   Trash2,
 } from 'lucide-react';
-import { DEFAULT_FOLDER_ID, DEFAULT_TAGS } from '../lib/db';
+import { DEFAULT_TAGS } from '../lib/db';
 import type { Folder as NoteFolder, WorkspaceFilter } from '../types';
 
 interface SidebarProps {
   query: string;
   folders: NoteFolder[];
   activeFilter: WorkspaceFilter;
-  activeFolderId: string;
   folderCounts: Record<string, number>;
   trashCount: number;
   onQueryChange: (value: string) => void;
   onFilterChange: (value: WorkspaceFilter) => void;
   onCreateFolder: () => void;
-  onRenameFolder: (folder: NoteFolder) => void;
-  onDeleteFolder: (folder: NoteFolder) => void;
+  onFolderContextMenu: (event: React.MouseEvent, folder: NoteFolder) => void;
   onCreateNote: () => void;
   onImportClick: () => void;
   onExportClick: () => void;
   searchInputRef: React.RefObject<HTMLInputElement>;
+  editingFolderId?: string;
+  editingFolderName: string;
+  onEditingFolderNameChange: (value: string) => void;
+  onCommitFolderRename: () => void;
+  onCancelFolderRename: () => void;
 }
 
 export function Sidebar({
   query,
   folders,
   activeFilter,
-  activeFolderId,
   folderCounts,
   trashCount,
   onQueryChange,
   onFilterChange,
   onCreateFolder,
-  onRenameFolder,
-  onDeleteFolder,
+  onFolderContextMenu,
   onCreateNote,
   onImportClick,
   onExportClick,
   searchInputRef,
+  editingFolderId,
+  editingFolderName,
+  onEditingFolderNameChange,
+  onCommitFolderRename,
+  onCancelFolderRename,
 }: SidebarProps) {
   return (
     <aside className="grid h-full w-[240px] shrink-0 grid-rows-[auto_1fr_auto] border-r border-stone-200 bg-linen">
@@ -98,42 +103,62 @@ export function Sidebar({
         <div className="mb-5 space-y-1">
           {folders.map((folder) => {
             const active = activeFilter === `folder:${folder.id}`;
-            return (
-              <div key={folder.id} className="group flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => onFilterChange(`folder:${folder.id}`)}
-                  className={`flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md px-3 text-left text-sm transition ${
-                    active ? 'bg-white text-ink shadow-subtle' : 'text-stone-600 hover:bg-white/70'
-                  }`}
+            const editing = editingFolderId === folder.id;
+            const rowClassName = `group flex h-9 w-full items-center gap-2 rounded-md px-3 text-left text-sm transition ${
+              active ? 'bg-white text-ink shadow-subtle' : 'text-stone-600 hover:bg-white/70'
+            }`;
+
+            if (editing) {
+              return (
+                <div
+                  key={folder.id}
+                  className={rowClassName}
+                  aria-current={active ? 'page' : undefined}
+                  data-testid={`folder-row-${folder.id}`}
+                  onContextMenu={(event) => onFolderContextMenu(event, folder)}
                 >
                   {active ? <FolderOpen size={15} /> : <Folder size={15} />}
-                  <span className="min-w-0 flex-1 truncate">{folder.name}</span>
+                  <input
+                    value={editingFolderName}
+                    onChange={(event) => onEditingFolderNameChange(event.target.value)}
+                    onBlur={onCommitFolderRename}
+                    onFocus={(event) => event.target.select()}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onCommitFolderRename();
+                      }
+                      if (event.key === 'Escape') {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onCancelFolderRename();
+                      }
+                    }}
+                    autoFocus
+                    className="min-w-0 flex-1 rounded border border-moss bg-white px-1.5 py-0.5 text-sm text-ink outline-none ring-2 ring-moss/15"
+                    aria-label="编辑文件夹名称"
+                    data-testid={`folder-rename-input-${folder.id}`}
+                  />
                   <span className="text-xs text-stone-400">{folderCounts[folder.id] || 0}</span>
-                </button>
-                {folder.id === activeFolderId ? (
-                  <button
-                    type="button"
-                    onClick={() => onRenameFolder(folder)}
-                    className="grid h-7 w-7 place-items-center rounded text-stone-400 hover:bg-white hover:text-ink"
-                    aria-label="重命名文件夹"
-                    title="重命名文件夹"
-                  >
-                    <Edit3 size={13} />
-                  </button>
-                ) : null}
-                {folder.id === activeFolderId && folder.id !== DEFAULT_FOLDER_ID ? (
-                  <button
-                    type="button"
-                    onClick={() => onDeleteFolder(folder)}
-                    className="grid h-7 w-7 place-items-center rounded text-stone-400 hover:bg-white hover:text-clay"
-                    aria-label="删除文件夹"
-                    title="删除文件夹"
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                ) : null}
-              </div>
+                </div>
+              );
+            }
+
+            return (
+              <button
+                key={folder.id}
+                type="button"
+                onClick={() => onFilterChange(`folder:${folder.id}`)}
+                onContextMenu={(event) => onFolderContextMenu(event, folder)}
+                className={rowClassName}
+                aria-current={active ? 'page' : undefined}
+                data-testid={`folder-row-${folder.id}`}
+              >
+                {active ? <FolderOpen size={15} /> : <Folder size={15} />}
+                <span className="min-w-0 flex-1 truncate">{folder.name}</span>
+                <span className="text-xs text-stone-400">{folderCounts[folder.id] || 0}</span>
+              </button>
             );
           })}
         </div>
