@@ -1,12 +1,15 @@
 import Dexie, { type Table } from 'dexie';
 import { nanoid } from 'nanoid';
-import type { Folder, ImageAttachment, Note } from '../types';
+import type { Folder, ImageAttachment, Note, SyncDevice, SyncEntity, SyncOperation, SyncQueueItem, SyncState } from '../types';
 import { stripHtml } from './html';
 
 class MarkNoteDatabase extends Dexie {
   folders!: Table<Folder, string>;
   notes!: Table<Note, string>;
   images!: Table<ImageAttachment, string>;
+  syncQueue!: Table<SyncQueueItem, string>;
+  syncStates!: Table<SyncState, string>;
+  syncDevices!: Table<SyncDevice, string>;
 
   constructor() {
     super('marknote');
@@ -28,12 +31,42 @@ class MarkNoteDatabase extends Dexie {
           note.folderId = note.folderId || DEFAULT_FOLDER_ID;
         });
       });
+    this.version(3).stores({
+      folders: '&id, sortOrder, updatedAt, deletedAt, syncStatus',
+      notes: '&id, folderId, updatedAt, createdAt, pinned, deletedAt, syncStatus, *tags',
+      images: '&id, noteId, updatedAt, deletedAt, syncStatus',
+      syncQueue: '&id, entity, entityId, [entity+entityId], operation, updatedAt, createdAt',
+      syncStates: '&id, provider, userId, deviceId, lastSyncedAt',
+      syncDevices: '&id, provider, lastSeenAt',
+    }).upgrade(async (transaction) => {
+      const folders = transaction.table<Folder, string>('folders');
+      const notes = transaction.table<Note, string>('notes');
+      const images = transaction.table<ImageAttachment, string>('images');
+      await folders.toCollection().modify((folder) => {
+        folder.deletedAt = folder.deletedAt ?? null;
+        folder.syncStatus = folder.syncStatus ?? 'local';
+        folder.lastSyncedAt = folder.lastSyncedAt ?? null;
+        folder.version = folder.version ?? 1;
+      });
+      await notes.toCollection().modify((note) => {
+        note.syncStatus = note.syncStatus ?? 'local';
+        note.lastSyncedAt = note.lastSyncedAt ?? null;
+        note.version = note.version ?? 1;
+      });
+      await images.toCollection().modify((image) => {
+        image.createdAt = image.createdAt ?? Date.now();
+        image.updatedAt = image.updatedAt ?? image.createdAt;
+        image.deletedAt = image.deletedAt ?? null;
+        image.syncStatus = image.syncStatus ?? 'local';
+        image.lastSyncedAt = image.lastSyncedAt ?? null;
+      });
+    });
   }
 }
 
 export const db = new MarkNoteDatabase();
 
-export const DEFAULT_TAGS = ['工作', '个人', '代码片段'];
+export const DEFAULT_TAGS = ['工作', '个人', '代码', '学习', '灵感', '项目', '读书', '会议', 'AI', '设计'];
 export const DEFAULT_FOLDER_ID = 'folder-library';
 export const CODE_FOLDER_ID = 'folder-code-snippets';
 export const ARCHIVE_FOLDER_ID = 'folder-archive';
@@ -78,7 +111,7 @@ export async function ensureSeedNote(): Promise<string> {
     title: '欢迎使用 MarkNote',
     content: WELCOME_CONTENT,
     folderId: DEFAULT_FOLDER_ID,
-    tags: ['个人', '代码片段'],
+    tags: ['个人', '代码'],
     pinned: true,
   });
   await db.notes.put(note);
@@ -99,27 +132,50 @@ export function createNoteDraft(input?: Partial<Note>): Note {
     tags: input?.tags ?? [],
     pinned: input?.pinned ?? false,
     deletedAt: input?.deletedAt ?? null,
+    syncStatus: input?.syncStatus ?? 'local',
+    lastSyncedAt: input?.lastSyncedAt ?? null,
+    version: input?.version ?? 1,
   };
 }
 
 export async function createNote(input?: Partial<Note>): Promise<Note> {
   const note = createNoteDraft(input);
-  await db.notes.add(note);
+  await db.transaction('rw', db.notes, db.syncQueue, async () => {
+    await db.notes.add({ ...note, syncStatus: 'pending' });
+    await enqueueSync('note', note.id, 'upsert');
+  });
   return note;
 }
 
-export async function upsertNote(input: Partial<Note>): Promise<Note> {
+export async function upsertNote(input: Partial<Note>, options?: { enqueueSync?: boolean }): Promise<Note> {
+  const enqueue = options?.enqueueSync ?? true;
   const note = createNoteDraft(input);
-  await db.notes.put(note);
+  const nextNote = enqueue ? { ...note, syncStatus: 'pending' as const } : note;
+  await db.transaction('rw', db.notes, db.syncQueue, async () => {
+    await db.notes.put(nextNote);
+    if (enqueue) {
+      await enqueueSync('note', note.id, 'upsert');
+    }
+  });
   return note;
 }
 
-export async function updateNote(id: string, changes: Partial<Note>): Promise<void> {
+export async function updateNote(id: string, changes: Partial<Note>, options?: { enqueueSync?: boolean }): Promise<void> {
+  const enqueue = options?.enqueueSync ?? true;
   const content = changes.content;
-  await db.notes.update(id, {
-    ...changes,
-    rawContent: content === undefined ? changes.rawContent : stripHtml(content),
-    updatedAt: changes.updatedAt ?? Date.now(),
+  const existing = await db.notes.get(id);
+  const nextUpdatedAt = changes.updatedAt ?? Date.now();
+  await db.transaction('rw', db.notes, db.syncQueue, async () => {
+    await db.notes.update(id, {
+      ...changes,
+      rawContent: content === undefined ? changes.rawContent : stripHtml(content),
+      updatedAt: nextUpdatedAt,
+      syncStatus: enqueue ? 'pending' : (changes.syncStatus ?? existing?.syncStatus ?? 'local'),
+      version: changes.version ?? (existing?.version ?? 0) + 1,
+    });
+    if (enqueue) {
+      await enqueueSync('note', id, 'upsert');
+    }
   });
 }
 
@@ -131,6 +187,10 @@ export function createFolderDraft(input?: Partial<Folder>): Folder {
     createdAt: input?.createdAt ?? now,
     updatedAt: input?.updatedAt ?? now,
     sortOrder: input?.sortOrder ?? now,
+    deletedAt: input?.deletedAt ?? null,
+    syncStatus: input?.syncStatus ?? 'local',
+    lastSyncedAt: input?.lastSyncedAt ?? null,
+    version: input?.version ?? 1,
   };
 }
 
@@ -156,18 +216,42 @@ export async function createFolder(name = '新建文件夹'): Promise<Folder> {
     name,
     sortOrder: (maxSortFolder?.sortOrder ?? 0) + 1,
   });
-  await db.folders.add(folder);
+  await db.transaction('rw', db.folders, db.syncQueue, async () => {
+    await db.folders.add({ ...folder, syncStatus: 'pending' });
+    await enqueueSync('folder', folder.id, 'upsert');
+  });
   return folder;
 }
 
-export async function renameFolder(id: string, name: string): Promise<void> {
+export async function upsertFolder(input: Partial<Folder>, options?: { enqueueSync?: boolean }): Promise<Folder> {
+  const enqueue = options?.enqueueSync ?? true;
+  const folder = createFolderDraft(input);
+  await db.transaction('rw', db.folders, db.syncQueue, async () => {
+    await db.folders.put(enqueue ? { ...folder, syncStatus: 'pending' } : folder);
+    if (enqueue) {
+      await enqueueSync('folder', folder.id, 'upsert');
+    }
+  });
+  return folder;
+}
+
+export async function renameFolder(id: string, name: string, options?: { enqueueSync?: boolean }): Promise<void> {
   const nextName = name.trim();
   if (!nextName) {
     return;
   }
-  await db.folders.update(id, {
-    name: nextName,
-    updatedAt: Date.now(),
+  const enqueue = options?.enqueueSync ?? true;
+  const existing = await db.folders.get(id);
+  await db.transaction('rw', db.folders, db.syncQueue, async () => {
+    await db.folders.update(id, {
+      name: nextName,
+      updatedAt: Date.now(),
+      syncStatus: enqueue ? 'pending' : (existing?.syncStatus ?? 'local'),
+      version: (existing?.version ?? 0) + 1,
+    });
+    if (enqueue) {
+      await enqueueSync('folder', id, 'upsert');
+    }
   });
 }
 
@@ -175,8 +259,32 @@ export async function deleteFolder(id: string, targetFolderId = DEFAULT_FOLDER_I
   if (id === DEFAULT_FOLDER_ID) {
     return;
   }
+  await db.transaction('rw', db.folders, db.notes, db.syncQueue, async () => {
+    const now = Date.now();
+    const moved = await db.notes.where('folderId').equals(id).toArray();
+    await db.notes.where('folderId').equals(id).modify((note) => {
+      note.folderId = targetFolderId;
+      note.updatedAt = now;
+      note.syncStatus = 'pending';
+      note.version = (note.version ?? 0) + 1;
+    });
+    await db.folders.delete(id);
+    await enqueueSync('folder', id, 'delete');
+    for (const note of moved) {
+      await enqueueSync('note', note.id, 'upsert');
+    }
+  });
+}
+
+export async function deleteFolderLocally(id: string, targetFolderId = DEFAULT_FOLDER_ID): Promise<void> {
+  if (id === DEFAULT_FOLDER_ID) {
+    return;
+  }
   await db.transaction('rw', db.folders, db.notes, async () => {
-    await db.notes.where('folderId').equals(id).modify({ folderId: targetFolderId });
+    await db.notes.where('folderId').equals(id).modify((note) => {
+      note.folderId = targetFolderId;
+      note.updatedAt = Date.now();
+    });
     await db.folders.delete(id);
   });
 }
@@ -186,24 +294,37 @@ export async function moveNoteToFolder(noteId: string, folderId: string): Promis
 }
 
 export async function softDeleteNote(id: string): Promise<void> {
-  await db.notes.update(id, {
-    deletedAt: Date.now(),
-    pinned: false,
-    updatedAt: Date.now(),
+  await db.transaction('rw', db.notes, db.syncQueue, async () => {
+    const existing = await db.notes.get(id);
+    await db.notes.update(id, {
+      deletedAt: Date.now(),
+      pinned: false,
+      updatedAt: Date.now(),
+      syncStatus: 'pending',
+      version: (existing?.version ?? 0) + 1,
+    });
+    await enqueueSync('note', id, 'upsert');
   });
 }
 
 export async function restoreNote(id: string): Promise<void> {
-  await db.notes.update(id, {
-    deletedAt: null,
-    updatedAt: Date.now(),
+  await db.transaction('rw', db.notes, db.syncQueue, async () => {
+    const existing = await db.notes.get(id);
+    await db.notes.update(id, {
+      deletedAt: null,
+      updatedAt: Date.now(),
+      syncStatus: 'pending',
+      version: (existing?.version ?? 0) + 1,
+    });
+    await enqueueSync('note', id, 'upsert');
   });
 }
 
 export async function permanentlyDeleteNote(id: string): Promise<void> {
-  await db.transaction('rw', db.notes, db.images, async () => {
+  await db.transaction('rw', db.notes, db.images, db.syncQueue, async () => {
     await db.images.where('noteId').equals(id).delete();
     await db.notes.delete(id);
+    await enqueueSync('note', id, 'delete');
   });
 }
 
@@ -211,4 +332,55 @@ export async function purgeExpiredTrash(): Promise<void> {
   const threshold = Date.now() - 30 * 24 * 60 * 60 * 1000;
   const expired = await db.notes.where('deletedAt').below(threshold).toArray();
   await Promise.all(expired.map((note) => permanentlyDeleteNote(note.id)));
+}
+
+export async function markSynced(entity: SyncEntity, entityId: string, syncedAt = Date.now()): Promise<void> {
+  const table = entityTable(entity);
+  if (!table) {
+    return;
+  }
+  await table.update(entityId, {
+    syncStatus: 'synced',
+    lastSyncedAt: syncedAt,
+  });
+}
+
+export async function clearSyncQueueItem(id: string): Promise<void> {
+  await db.syncQueue.delete(id);
+}
+
+export async function enqueueSync(entity: SyncEntity, entityId: string, operation: SyncOperation): Promise<void> {
+  const now = Date.now();
+  const existing = await db.syncQueue.where('[entity+entityId]').equals([entity, entityId]).first().catch(() => undefined);
+  if (existing) {
+    await db.syncQueue.update(existing.id, {
+      operation,
+      updatedAt: now,
+      lastError: undefined,
+    });
+    return;
+  }
+
+  await db.syncQueue.put({
+    id: nanoid(),
+    entity,
+    entityId,
+    operation,
+    createdAt: now,
+    updatedAt: now,
+    attempts: 0,
+  });
+}
+
+function entityTable(entity: SyncEntity): Table<Folder | Note | ImageAttachment, string> | null {
+  if (entity === 'folder') {
+    return db.folders as Table<Folder | Note | ImageAttachment, string>;
+  }
+  if (entity === 'note') {
+    return db.notes as Table<Folder | Note | ImageAttachment, string>;
+  }
+  if (entity === 'attachment') {
+    return db.images as Table<Folder | Note | ImageAttachment, string>;
+  }
+  return null;
 }

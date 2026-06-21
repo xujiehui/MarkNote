@@ -11,9 +11,9 @@ export function stripHtml(html: string): string {
   return (doc.body.textContent || '').replace(/\s+/g, ' ').trim();
 }
 
-export function getPreview(html: string, limit = 20): string {
+export function getPreview(html: string, limit = 20, emptyText = 'Blank note'): string {
   const text = stripHtml(html);
-  return text.length > limit ? `${text.slice(0, limit)}...` : text || '空白笔记';
+  return text.length > limit ? `${text.slice(0, limit)}...` : text || emptyText;
 }
 
 export function sanitizeTitle(value: string): string {

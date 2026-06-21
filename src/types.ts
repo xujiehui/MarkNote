@@ -9,6 +9,9 @@ export interface Note {
   tags: string[];
   pinned: boolean;
   deletedAt?: number | null;
+  syncStatus?: SyncStatus;
+  lastSyncedAt?: number | null;
+  version?: number;
 }
 
 export interface Folder {
@@ -17,6 +20,10 @@ export interface Folder {
   createdAt: number;
   updatedAt: number;
   sortOrder: number;
+  deletedAt?: number | null;
+  syncStatus?: SyncStatus;
+  lastSyncedAt?: number | null;
+  version?: number;
 }
 
 export interface ImageAttachment {
@@ -24,11 +31,59 @@ export interface ImageAttachment {
   noteId: string;
   data: string;
   mimeType: string;
+  storagePath?: string;
+  sizeBytes?: number;
+  createdAt?: number;
+  updatedAt?: number;
+  deletedAt?: number | null;
+  syncStatus?: SyncStatus;
+  lastSyncedAt?: number | null;
+}
+
+export type SyncEntity = 'folder' | 'note' | 'attachment';
+
+export type SyncOperation = 'upsert' | 'delete';
+
+export type SyncStatus = 'local' | 'pending' | 'synced' | 'conflict' | 'error';
+
+export interface SyncQueueItem {
+  id: string;
+  entity: SyncEntity;
+  entityId: string;
+  operation: SyncOperation;
+  createdAt: number;
+  updatedAt: number;
+  attempts: number;
+  lastError?: string;
+}
+
+export interface SyncDevice {
+  id: string;
+  name: string;
+  provider: string;
+  createdAt: number;
+  lastSeenAt: number;
+}
+
+export interface SyncState {
+  id: string;
+  provider: string;
+  userId: string;
+  deviceId: string;
+  lastPulledAt: number;
+  lastPushedAt: number;
+  lastSyncedAt: number;
+  status: SyncStatus;
+  lastError?: string;
 }
 
 export type ExportFormat = 'html' | 'pdf' | 'markdown' | 'json';
 
 export type WorkspaceFilter = 'all' | 'trash' | `folder:${string}` | `tag:${string}`;
+
+export type NoteSortMode = 'updated' | 'created' | 'title' | 'favorite';
+
+export type NoteQuickFilter = 'all' | 'pinned' | 'recent7' | 'recent30' | 'archived';
 
 export interface ImportResult {
   title: string;

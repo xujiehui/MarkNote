@@ -1,5 +1,6 @@
 import { Edit3, FolderPlus, Trash2 } from 'lucide-react';
 import { DEFAULT_FOLDER_ID } from '../lib/db';
+import { getFolderDisplayName, useI18n } from '../i18n';
 import type { Folder as NoteFolder } from '../types';
 
 interface FolderContextMenuState {
@@ -25,7 +26,9 @@ export function FolderContextMenu({
   onRenameFolder,
   onDeleteFolder,
 }: FolderContextMenuProps) {
+  const { t } = useI18n();
   const { folder } = state;
+  const folderName = getFolderDisplayName(folder, t);
   const canDelete = folder.id !== DEFAULT_FOLDER_ID;
   const viewport = getViewportSize();
   const left = clampToViewport(state.x, MENU_WIDTH, viewport.width);
@@ -36,7 +39,7 @@ export function FolderContextMenu({
       className="fixed z-50 overflow-hidden rounded-md border border-stone-200 bg-white py-1 text-sm shadow-subtle"
       style={{ left, top, width: MENU_WIDTH }}
       role="menu"
-      aria-label={`${folder.name} 文件夹操作`}
+      aria-label={t('folder.operationLabel', { name: folderName })}
       data-testid="folder-context-menu"
     >
       <button
@@ -47,7 +50,7 @@ export function FolderContextMenu({
         data-testid="folder-context-create"
       >
         <FolderPlus size={15} />
-        新建文件夹
+        {t('folder.contextCreate')}
       </button>
       <button
         type="button"
@@ -57,7 +60,7 @@ export function FolderContextMenu({
         data-testid="folder-context-rename"
       >
         <Edit3 size={15} />
-        重命名
+        {t('folder.contextRename')}
       </button>
       <button
         type="button"
@@ -68,7 +71,7 @@ export function FolderContextMenu({
         data-testid="folder-context-delete"
       >
         <Trash2 size={15} />
-        删除
+        {t('folder.contextDelete')}
       </button>
     </div>
   );

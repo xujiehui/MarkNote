@@ -1,25 +1,43 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EditorContent, useEditor } from '@tiptap/react';
+import { Mark, mergeAttributes } from '@tiptap/core';
 import { NodeSelection } from '@tiptap/pm/state';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import {
-  Bold,
-  Code2,
-  Heading1,
-  Heading2,
-  Heading3,
-  ImagePlus,
-  Italic,
-  List,
-  ListOrdered,
-  Quote,
-  Save,
-  Trash2,
   AlignCenter,
   AlignLeft,
   AlignRight,
+  Bot,
+  Bold,
+  CheckSquare,
+  ChevronDown,
+  Code2,
   Copy,
+  File,
+  Heading1,
+  Heading2,
+  Heading3,
+  History,
+  ImagePlus,
+  Italic,
+  List,
+  ListChecks,
+  ListOrdered,
+  MessageSquareQuote,
+  Minus,
+  Music,
+  PanelTop,
+  Quote,
+  Save,
+  Share2,
+  Sigma,
+  Sparkles,
+  Strikethrough,
+  Table2,
+  Trash2,
+  Underline,
+  Wand2,
 } from 'lucide-react';
 import type { Note } from '../types';
 import { DEFAULT_TAGS } from '../lib/db';
@@ -27,6 +45,7 @@ import { fileToBase64Image } from '../lib/image';
 import { formatFullDate } from '../lib/date';
 import { CODE_LANGUAGES } from '../editor/codeBlockUtils';
 import { ResizableImage } from '../editor/ResizableImage';
+import { getTagDisplayName, useI18n } from '../i18n';
 import { IconButton } from './IconButton';
 
 interface EditorPaneProps {
@@ -68,6 +87,7 @@ export function EditorPane({
   onManualSave,
   onToggleTag,
 }: EditorPaneProps) {
+  const { locale, t } = useI18n();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const editorShellRef = useRef<HTMLDivElement>(null);
   const [codeLanguage, setCodeLanguage] = useState('javascript');
@@ -75,6 +95,9 @@ export function EditorPane({
   const [imageMenu, setImageMenu] = useState<ImageMenu | null>(null);
   const [codeCopyOverlay, setCodeCopyOverlay] = useState<CodeCopyOverlay | null>(null);
   const [isImageDragOver, setIsImageDragOver] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [toast, setToast] = useState('');
 
   const extensions = useMemo(
@@ -87,14 +110,15 @@ export function EditorPane({
         },
       }),
       Placeholder.configure({
-        placeholder: '开始写作，粘贴图片，或输入 ``` 创建代码块',
+        placeholder: t('editor.placeholder'),
       }),
+      UnderlineMark,
       ResizableImage.configure({
         allowBase64: true,
         inline: false,
       }),
     ],
-    [],
+    [t],
   );
 
   const editor = useEditor({
@@ -256,8 +280,8 @@ export function EditorPane({
     return (
       <main className="grid min-w-0 flex-1 place-items-center bg-paper px-8 text-center text-stone-500">
         <div>
-          <p className="text-base font-medium text-ink">选择或新建一条笔记</p>
-          <p className="mt-2 text-sm">你的图文、代码和标签都会保存在本机 IndexedDB。</p>
+          <p className="text-base font-medium text-ink">{t('note.chooseOrCreate')}</p>
+          <p className="mt-2 text-sm">{t('note.localStorageHint')}</p>
         </div>
       </main>
     );
@@ -267,9 +291,17 @@ export function EditorPane({
     editor?.chain().focus().toggleCodeBlock({ language: codeLanguage }).run();
   }
 
+  function insertParagraphBlock(content: string) {
+    editor?.chain().focus().insertContent(content).run();
+  }
+
+  function toggleUnderline() {
+    editor?.chain().focus().toggleMark('underline').run();
+  }
+
   async function copyCodeText(text: string) {
     await navigator.clipboard.writeText(text);
-    setToast('代码已复制');
+    setToast(t('editor.codeCopied'));
     window.setTimeout(() => setToast(''), 1200);
   }
 
@@ -281,7 +313,7 @@ export function EditorPane({
     const response = await fetch(src);
     const blob = await response.blob();
     await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
-    setToast('图片已复制');
+    setToast(t('editor.imageCopied'));
     window.setTimeout(() => setToast(''), 1200);
   }
 
@@ -343,98 +375,214 @@ export function EditorPane({
   }
 
   return (
-    <main className="grid min-w-0 flex-1 grid-rows-[auto_1fr] bg-paper">
-      <header className="border-b border-stone-200 bg-paper px-5 py-3">
-        <div className="flex items-center gap-3">
-          <input
-            value={note.title}
-            onChange={(event) => onTitleChange(event.target.value)}
-            className="min-w-0 flex-1 bg-transparent text-xl font-semibold text-ink outline-none"
-            placeholder="未命名笔记"
-          />
-          <div className="shrink-0 rounded-md border border-stone-200 bg-white px-2 py-1 text-xs text-stone-500">
-            {saveState === 'saving' ? '保存中' : saveState === 'saved' ? '已保存' : '本地自动保存'}
-          </div>
-          <button
-            type="button"
-            onClick={onManualSave}
-            className="grid h-8 w-8 place-items-center rounded-md border border-stone-300 bg-white text-stone-700 hover:bg-stone-100"
-            title="保存"
-            aria-label="保存"
-          >
-            <Save size={16} />
-          </button>
-        </div>
-
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <IconButton icon={Bold} label="加粗" active={editor?.isActive('bold')} onClick={() => editor?.chain().focus().toggleBold().run()} />
-          <IconButton icon={Italic} label="斜体" active={editor?.isActive('italic')} onClick={() => editor?.chain().focus().toggleItalic().run()} />
-          <IconButton icon={Heading1} label="H1" active={editor?.isActive('heading', { level: 1 })} onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()} />
-          <IconButton icon={Heading2} label="H2" active={editor?.isActive('heading', { level: 2 })} onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()} />
-          <IconButton icon={Heading3} label="H3" active={editor?.isActive('heading', { level: 3 })} onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()} />
-          <IconButton icon={Quote} label="引用" active={editor?.isActive('blockquote')} onClick={() => editor?.chain().focus().toggleBlockquote().run()} />
-          <IconButton icon={List} label="无序列表" active={editor?.isActive('bulletList')} onClick={() => editor?.chain().focus().toggleBulletList().run()} />
-          <IconButton icon={ListOrdered} label="有序列表" active={editor?.isActive('orderedList')} onClick={() => editor?.chain().focus().toggleOrderedList().run()} />
-
-          <div className="ml-1 flex h-8 items-center overflow-hidden rounded-md border border-stone-300 bg-white">
-            <select
-              value={codeLanguage}
-              onChange={(event) => setCodeLanguage(event.target.value)}
-              className="h-full border-0 bg-white px-2 text-xs text-stone-700 outline-none"
-              aria-label="代码语言"
-            >
-              {CODE_LANGUAGES.map((language) => (
-                <option key={language} value={language}>
-                  {language}
-                </option>
+    <main className="grid min-w-0 flex-1 grid-rows-[auto_1fr] bg-white">
+      <header className="border-b border-gray-200 bg-white px-6 py-4">
+        <div className="mx-auto flex max-w-[900px] items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <input
+              value={note.title}
+              onChange={(event) => onTitleChange(event.target.value)}
+              className="min-w-0 w-full bg-transparent text-[28px] font-bold leading-tight text-gray-900 outline-none"
+              placeholder={t('note.untitled')}
+            />
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              {DEFAULT_TAGS.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => onToggleTag(tag)}
+                  className={`h-7 rounded-full border px-2.5 text-xs font-medium transition ${
+                    note.tags.includes(tag)
+                      ? 'border-primary-500 bg-primary-50 text-primary-700'
+                      : 'border-gray-200 bg-gray-50 text-gray-500 hover:border-gray-300 hover:bg-white hover:text-gray-900'
+                  }`}
+                >
+                  {getTagDisplayName(tag, t)}
+                </button>
               ))}
-            </select>
+            </div>
+          </div>
+
+          <div className="flex shrink-0 flex-wrap justify-end gap-2">
+            <div className="flex h-8 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2.5 text-xs font-medium text-gray-500">
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  saveState === 'saving' ? 'bg-warning' : saveState === 'saved' ? 'bg-success' : 'bg-primary-500'
+                }`}
+              />
+              {saveState === 'saving' ? t('editor.saveSaving') : saveState === 'saved' ? t('editor.saveSaved') : t('editor.saveAuto')}
+            </div>
             <button
               type="button"
-              onClick={insertCodeBlock}
-              className="grid h-full w-8 place-items-center border-l border-stone-300 text-stone-700 hover:bg-stone-100"
-              aria-label="插入代码块"
-              title="插入代码块"
+              onClick={onManualSave}
+              className="grid h-8 w-8 place-items-center rounded-lg border border-gray-200 bg-white text-gray-600 transition hover:bg-gray-50 hover:text-gray-900"
+              title={t('editor.save')}
+              aria-label={t('editor.save')}
             >
-              <Code2 size={15} />
+              <Save size={16} />
             </button>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="grid h-8 w-8 place-items-center rounded-md border border-stone-300 bg-white text-stone-700 hover:bg-stone-100"
-            aria-label="插入图片"
-            title="插入图片"
-          >
-            <ImagePlus size={16} />
-          </button>
-
-          <div className="ml-auto flex flex-wrap gap-1">
-            {DEFAULT_TAGS.map((tag) => (
+            <div className="relative">
               <button
-                key={tag}
                 type="button"
-                onClick={() => onToggleTag(tag)}
-                className={`h-8 rounded-md border px-2.5 text-xs transition ${
-                  note.tags.includes(tag)
-                    ? 'border-moss bg-moss text-white'
-                    : 'border-stone-300 bg-white text-stone-600 hover:bg-stone-100'
-                }`}
+                onClick={() => {
+                  setShareOpen((value) => !value);
+                  setHistoryOpen(false);
+                  setAiOpen(false);
+                }}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-medium text-gray-600 transition hover:bg-gray-50 hover:text-gray-900"
               >
-                {tag}
+                <Share2 size={15} />
+                {t('editor.share')}
               </button>
-            ))}
+              {shareOpen ? (
+                <div className="absolute right-0 top-10 z-40 w-56 rounded-lg border border-gray-200 bg-white p-2 text-sm shadow-subtle">
+                  {[t('editor.sharePrivate'), t('editor.sharePublic'), t('editor.shareTeam')].map((item) => (
+                    <button key={item} type="button" className="flex h-9 w-full items-center rounded-md px-2 text-left text-gray-600 hover:bg-gray-50">
+                      {item}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  setHistoryOpen((value) => !value);
+                  setShareOpen(false);
+                  setAiOpen(false);
+                }}
+                className="grid h-8 w-8 place-items-center rounded-lg border border-gray-200 bg-white text-gray-600 transition hover:bg-gray-50 hover:text-gray-900"
+                title={t('editor.history')}
+                aria-label={t('editor.history')}
+              >
+                <History size={16} />
+              </button>
+              {historyOpen ? (
+                <div className="absolute right-0 top-10 z-40 w-64 rounded-lg border border-gray-200 bg-white p-3 text-sm shadow-subtle">
+                  <div className="mb-2 text-xs font-semibold uppercase text-gray-400">{t('editor.versionToday')}</div>
+                  <div className="rounded-md bg-gray-50 p-2">
+                    <div className="text-xs font-medium text-gray-800">{formatFullDate(note.updatedAt, locale)}</div>
+                    <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
+                      {[t('editor.versionCompare'), t('editor.versionRestore'), t('editor.versionCopy')].map((item) => (
+                        <button key={item} type="button" className="h-7 rounded border border-gray-200 bg-white text-gray-600 hover:bg-gray-50">
+                          {item}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  setAiOpen((value) => !value);
+                  setShareOpen(false);
+                  setHistoryOpen(false);
+                }}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary-600 px-3 text-xs font-semibold text-white transition hover:bg-primary-700 active:scale-[0.98]"
+              >
+                <Sparkles size={15} />
+                {t('editor.ai')}
+                <ChevronDown size={13} />
+              </button>
+              {aiOpen ? (
+                <div className="absolute right-0 top-10 z-40 w-56 rounded-lg border border-gray-200 bg-white p-2 text-sm shadow-subtle">
+                  {[
+                    [t('editor.aiContinue'), Wand2],
+                    [t('editor.aiSummarize'), Bot],
+                    [t('editor.aiPolish'), Sparkles],
+                    [t('editor.aiTranslate'), MessageSquareQuote],
+                    [t('editor.aiTitle'), Heading1],
+                    [t('editor.aiOutline'), ListChecks],
+                    [t('editor.aiTodos'), CheckSquare],
+                  ].map(([label, Icon]) => (
+                    <button
+                      key={String(label)}
+                      type="button"
+                      onClick={() => {
+                        setToast(String(label));
+                        setAiOpen(false);
+                        window.setTimeout(() => setToast(''), 1200);
+                      }}
+                      className="flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-gray-700 hover:bg-primary-50 hover:text-primary-700"
+                    >
+                      <Icon size={15} />
+                      {String(label)}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           </div>
         </div>
 
-        <div className="mt-2 text-xs text-stone-400">更新于 {formatFullDate(note.updatedAt)}</div>
+        <div className="mx-auto mt-4 flex max-w-[900px] flex-wrap items-center gap-2">
+          <ToolbarGroup label={t('editor.textStyle')}>
+            <IconButton icon={Bold} label={t('editor.bold')} active={editor?.isActive('bold')} onClick={() => editor?.chain().focus().toggleBold().run()} />
+            <IconButton icon={Italic} label={t('editor.italic')} active={editor?.isActive('italic')} onClick={() => editor?.chain().focus().toggleItalic().run()} />
+            <IconButton icon={Underline} label={t('editor.underline')} active={editor?.isActive('underline')} onClick={toggleUnderline} />
+            <IconButton icon={Strikethrough} label={t('editor.strike')} active={editor?.isActive('strike')} onClick={() => editor?.chain().focus().toggleStrike().run()} />
+          </ToolbarGroup>
+          <ToolbarGroup label={t('editor.heading1')}>
+            <IconButton icon={Heading1} label={t('editor.heading1')} active={editor?.isActive('heading', { level: 1 })} onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()} />
+            <IconButton icon={Heading2} label={t('editor.heading2')} active={editor?.isActive('heading', { level: 2 })} onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()} />
+            <IconButton icon={Heading3} label={t('editor.heading3')} active={editor?.isActive('heading', { level: 3 })} onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()} />
+          </ToolbarGroup>
+          <ToolbarGroup label={t('editor.contentBlocks')}>
+            <IconButton icon={List} label={t('editor.bulletList')} active={editor?.isActive('bulletList')} onClick={() => editor?.chain().focus().toggleBulletList().run()} />
+            <IconButton icon={ListOrdered} label={t('editor.orderedList')} active={editor?.isActive('orderedList')} onClick={() => editor?.chain().focus().toggleOrderedList().run()} />
+            <IconButton icon={CheckSquare} label={t('editor.checklist')} onClick={() => insertParagraphBlock('<ul data-type="taskList"><li><p>Todo</p></li></ul>')} />
+            <IconButton icon={Quote} label={t('editor.quote')} active={editor?.isActive('blockquote')} onClick={() => editor?.chain().focus().toggleBlockquote().run()} />
+            <IconButton icon={Minus} label={t('editor.divider')} onClick={() => insertParagraphBlock('<hr><p></p>')} />
+          </ToolbarGroup>
+          <ToolbarGroup label={t('editor.mediaBlocks')}>
+            <IconButton icon={ImagePlus} label={t('editor.insertImage')} onClick={() => fileInputRef.current?.click()} />
+            <IconButton icon={PanelTop} label={t('editor.video')} onClick={() => insertParagraphBlock('<p>[Video]</p>')} />
+            <IconButton icon={Music} label={t('editor.audio')} onClick={() => insertParagraphBlock('<p>[Audio]</p>')} />
+            <IconButton icon={File} label={t('editor.file')} onClick={() => insertParagraphBlock('<p>[File]</p>')} />
+          </ToolbarGroup>
+          <ToolbarGroup label={t('editor.dataBlocks')}>
+            <div className="flex h-8 items-center overflow-hidden rounded-md border border-gray-200 bg-white">
+              <select
+                value={codeLanguage}
+                onChange={(event) => setCodeLanguage(event.target.value)}
+                className="h-full border-0 bg-white px-2 text-xs text-gray-700 outline-none"
+                aria-label={t('editor.codeLanguage')}
+              >
+                {CODE_LANGUAGES.map((language) => (
+                  <option key={language} value={language}>
+                    {language}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                data-editor-insert-code="true"
+                onClick={insertCodeBlock}
+                className="grid h-full w-8 place-items-center border-l border-gray-200 text-gray-600 hover:bg-gray-50"
+                aria-label={t('editor.insertCodeBlock')}
+                title={t('editor.insertCodeBlock')}
+              >
+                <Code2 size={15} />
+              </button>
+            </div>
+            <IconButton icon={Table2} label={t('editor.table')} onClick={() => insertParagraphBlock('<table><tbody><tr><td>Key</td><td>Value</td></tr></tbody></table><p></p>')} />
+            <IconButton icon={Sigma} label={t('editor.math')} onClick={() => insertParagraphBlock('<p>$$ E = mc^2 $$</p>')} />
+            <IconButton icon={Code2} label={t('editor.mermaid')} onClick={() => insertParagraphBlock('<pre><code class="language-mermaid">graph TD\\nA-->B</code></pre>')} />
+          </ToolbarGroup>
+          <div className="ml-auto text-xs text-gray-400">{t('editor.slashHint')}</div>
+        </div>
+
+        <div className="mx-auto mt-3 max-w-[900px] text-xs text-gray-400">{t('note.updatedAt', { date: formatFullDate(note.updatedAt, locale) })}</div>
       </header>
 
       <section
         ref={editorShellRef}
-        className={`relative min-h-0 overflow-y-auto px-8 py-6 transition ${
-          isImageDragOver ? 'ring-2 ring-inset ring-moss/35' : ''
+        className={`relative min-h-0 overflow-y-auto bg-white px-8 py-8 transition ${
+          isImageDragOver ? 'ring-2 ring-inset ring-primary-300' : ''
         }`}
         onMouseMove={updateCodeCopyOverlay}
         onMouseLeave={() => {
@@ -477,13 +625,13 @@ export function EditorPane({
         }}
       >
         <EditorContent editor={editor} />
-        {toast ? <div className="fixed bottom-5 right-5 rounded-md bg-ink px-3 py-2 text-sm text-white shadow-subtle">{toast}</div> : null}
+        {toast ? <div className="fixed bottom-5 right-5 rounded-lg bg-gray-900 px-3 py-2 text-sm text-white shadow-subtle">{toast}</div> : null}
         {codeCopyOverlay ? (
           <button
             type="button"
             data-code-copy-overlay="true"
-            aria-label="复制代码"
-            title="复制代码"
+            aria-label={t('editor.copyCode')}
+            title={t('editor.copyCode')}
             onClick={(event) => {
               event.stopPropagation();
               void copyCodeText(codeCopyOverlay.text);
@@ -492,42 +640,42 @@ export function EditorPane({
             style={{ left: codeCopyOverlay.x, top: codeCopyOverlay.y }}
           >
             <Copy size={13} />
-            复制
+            {t('editor.copyCode')}
           </button>
         ) : null}
         {imageBubble ? (
           <div
-            className="fixed z-30 flex items-center gap-1 rounded-md border border-stone-200 bg-white p-1 shadow-subtle"
+            className="fixed z-30 flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-1 shadow-subtle"
             style={{ left: imageBubble.x, top: imageBubble.y }}
           >
-            <IconButton icon={AlignLeft} label="图片左浮动" onClick={() => setImageAlign('left')} />
-            <IconButton icon={AlignCenter} label="图片居中" onClick={() => setImageAlign('center')} />
-            <IconButton icon={AlignRight} label="图片右浮动" onClick={() => setImageAlign('right')} />
+            <IconButton icon={AlignLeft} label={t('editor.imageLeft')} onClick={() => setImageAlign('left')} />
+            <IconButton icon={AlignCenter} label={t('editor.imageCenter')} onClick={() => setImageAlign('center')} />
+            <IconButton icon={AlignRight} label={t('editor.imageRight')} onClick={() => setImageAlign('right')} />
             <button
               type="button"
               onClick={() => setImageWidth('50%')}
-              className="h-8 rounded-md border border-stone-300 bg-white px-2 text-xs text-stone-700 hover:bg-stone-100"
+              className="h-8 rounded-md border border-gray-200 bg-white px-2 text-xs text-gray-600 hover:bg-gray-50"
             >
               50%
             </button>
             <button
               type="button"
               onClick={() => setImageWidth('100%')}
-              className="h-8 rounded-md border border-stone-300 bg-white px-2 text-xs text-stone-700 hover:bg-stone-100"
+              className="h-8 rounded-md border border-gray-200 bg-white px-2 text-xs text-gray-600 hover:bg-gray-50"
             >
               100%
             </button>
-            <IconButton icon={Copy} label="复制图片" onClick={() => void copySelectedImage()} />
-            <IconButton icon={Trash2} label="删除图片" onClick={deleteSelectedImage} />
+            <IconButton icon={Copy} label={t('editor.copyImage')} onClick={() => void copySelectedImage()} />
+            <IconButton icon={Trash2} label={t('editor.deleteImage')} onClick={deleteSelectedImage} />
           </div>
         ) : null}
         {imageBubble ? (
           <button
             type="button"
-            aria-label="拖拽缩放图片"
-            title="拖拽缩放图片"
+            aria-label={t('editor.resizeImage')}
+            title={t('editor.resizeImage')}
             onMouseDown={startImageResize}
-            className="fixed z-30 h-4 w-4 rounded border border-white bg-moss shadow-subtle ring-1 ring-ink/20"
+            className="fixed z-30 h-4 w-4 rounded border border-white bg-primary-600 shadow-subtle ring-1 ring-gray-900/20"
             style={{
               left: imageBubble.imageX + imageBubble.width - 8,
               top: imageBubble.imageY + imageBubble.height - 8,
@@ -537,37 +685,37 @@ export function EditorPane({
         ) : null}
         {imageMenu ? (
           <div
-            className="fixed z-40 w-52 overflow-hidden rounded-md border border-stone-200 bg-white py-1 text-sm shadow-subtle"
+            className="fixed z-40 w-52 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 text-sm shadow-subtle"
             style={{ left: imageMenu.x, top: imageMenu.y }}
             onClick={(event) => event.stopPropagation()}
           >
-            <button type="button" onClick={() => setImageAlign('left')} className="flex h-9 w-full items-center gap-2 px-3 text-left text-stone-700 hover:bg-stone-100">
+            <button type="button" onClick={() => setImageAlign('left')} className="flex h-9 w-full items-center gap-2 px-3 text-left text-gray-700 hover:bg-gray-50">
               <AlignLeft size={15} />
-              左浮动
+              {t('editor.leftFloat')}
             </button>
-            <button type="button" onClick={() => setImageAlign('right')} className="flex h-9 w-full items-center gap-2 px-3 text-left text-stone-700 hover:bg-stone-100">
+            <button type="button" onClick={() => setImageAlign('right')} className="flex h-9 w-full items-center gap-2 px-3 text-left text-gray-700 hover:bg-gray-50">
               <AlignRight size={15} />
-              右浮动
+              {t('editor.rightFloat')}
             </button>
-            <button type="button" onClick={() => setImageAlign('center')} className="flex h-9 w-full items-center gap-2 px-3 text-left text-stone-700 hover:bg-stone-100">
+            <button type="button" onClick={() => setImageAlign('center')} className="flex h-9 w-full items-center gap-2 px-3 text-left text-gray-700 hover:bg-gray-50">
               <AlignCenter size={15} />
-              居中独占
+              {t('editor.centerBlock')}
             </button>
-            <div className="grid grid-cols-2 border-y border-stone-100">
-              <button type="button" onClick={() => setImageWidth('50%')} className="h-9 text-xs text-stone-700 hover:bg-stone-100">
-                宽度 50%
+            <div className="grid grid-cols-2 border-y border-gray-100">
+              <button type="button" onClick={() => setImageWidth('50%')} className="h-9 text-xs text-gray-700 hover:bg-gray-50">
+                {t('editor.width50')}
               </button>
-              <button type="button" onClick={() => setImageWidth('100%')} className="h-9 border-l border-stone-100 text-xs text-stone-700 hover:bg-stone-100">
-                宽度 100%
+              <button type="button" onClick={() => setImageWidth('100%')} className="h-9 border-l border-gray-100 text-xs text-gray-700 hover:bg-gray-50">
+                {t('editor.width100')}
               </button>
             </div>
-            <button type="button" onClick={() => void copySelectedImage()} className="flex h-9 w-full items-center gap-2 px-3 text-left text-stone-700 hover:bg-stone-100">
+            <button type="button" onClick={() => void copySelectedImage()} className="flex h-9 w-full items-center gap-2 px-3 text-left text-gray-700 hover:bg-gray-50">
               <Copy size={15} />
-              复制图片
+              {t('editor.copyImage')}
             </button>
-            <button type="button" onClick={deleteSelectedImage} className="flex h-9 w-full items-center gap-2 border-t border-stone-100 px-3 text-left text-clay hover:bg-stone-100">
+            <button type="button" onClick={deleteSelectedImage} className="flex h-9 w-full items-center gap-2 border-t border-gray-100 px-3 text-left text-error hover:bg-gray-50">
               <Trash2 size={15} />
-              删除图片
+              {t('editor.deleteImage')}
             </button>
           </div>
         ) : null}
@@ -594,3 +742,24 @@ function cssEscape(value: string): string {
   }
   return value.replace(/"/g, '\\"');
 }
+
+function ToolbarGroup({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex min-h-9 items-center gap-1 rounded-lg border border-gray-200 bg-gray-50 p-0.5" aria-label={label}>
+      {children}
+    </div>
+  );
+}
+
+const UnderlineMark = Mark.create({
+  name: 'underline',
+
+  parseHTML() {
+    return [{ tag: 'u' }, { style: 'text-decoration-line=underline' }, { style: 'text-decoration=underline' }];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ['u', mergeAttributes(HTMLAttributes), 0];
+  },
+
+});

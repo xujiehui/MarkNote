@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import type { Folder, Note, ExportFormat, WorkspaceFilter } from './types';
+import type { Folder, Note, ExportFormat, NoteQuickFilter, NoteSortMode, WorkspaceFilter } from './types';
 import {
+  ARCHIVE_FOLDER_ID,
+  CODE_FOLDER_ID,
   createFolder,
   createNote,
   db,
@@ -27,6 +29,9 @@ import { FolderContextMenu } from './components/FolderContextMenu';
 import { ImportDialog } from './components/ImportDialog';
 import { ExportMenu } from './components/ExportMenu';
 import { LandingPage } from './LandingPage';
+import { getFolderDisplayName, getTagDisplayName, useI18n } from './i18n';
+import { useSyncSession } from './sync/useSyncSession';
+import { Clock3, Command, Database } from 'lucide-react';
 
 interface ContextState {
   note: Note;
@@ -43,11 +48,14 @@ interface FolderContextState {
 type SaveState = 'idle' | 'saving' | 'saved';
 
 function NoteWorkspace() {
+  const { t } = useI18n();
   const folders = useLiveQuery(() => db.folders.orderBy('sortOrder').toArray(), [], []);
   const notes = useLiveQuery(() => db.notes.toArray(), [], []);
   const [activeNoteId, setActiveNoteId] = useState<string>('');
   const [query, setQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<WorkspaceFilter>(`folder:${DEFAULT_FOLDER_ID}`);
+  const [sortMode, setSortMode] = useState<NoteSortMode>('updated');
+  const [quickFilter, setQuickFilter] = useState<NoteQuickFilter>('all');
   const [contextMenu, setContextMenu] = useState<ContextState | null>(null);
   const [folderContextMenu, setFolderContextMenu] = useState<FolderContextState | null>(null);
   const [showImport, setShowImport] = useState(false);
@@ -58,6 +66,7 @@ function NoteWorkspace() {
   const [draftContent, setDraftContent] = useState('');
   const [dirty, setDirty] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>('idle');
+  const sync = useSyncSession();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const debouncedQuery = useDebouncedValue(query, 180);
   const activeNote = notes.find((note) => note.id === activeNoteId);
@@ -109,25 +118,37 @@ function NoteWorkspace() {
     setSaveState('saving');
     const timer = window.setTimeout(async () => {
       await updateNote(activeNoteId, {
-        title: draftTitle || '未命名笔记',
+        title: draftTitle || t('note.untitled'),
         content: draftContent,
       });
       setDirty(false);
       setSaveState('saved');
       window.setTimeout(() => setSaveState('idle'), 900);
-    }, 500);
+    }, 1000);
 
     return () => window.clearTimeout(timer);
-  }, [activeNoteId, dirty, draftTitle, draftContent]);
+  }, [activeNoteId, dirty, draftTitle, draftContent, t]);
 
   const sortedNotes = useMemo(() => {
     return [...notes].sort((a, b) => {
+      if (sortMode === 'favorite') {
+        if (a.pinned !== b.pinned) {
+          return Number(b.pinned) - Number(a.pinned);
+        }
+        return b.updatedAt - a.updatedAt;
+      }
+      if (sortMode === 'created') {
+        return b.createdAt - a.createdAt;
+      }
+      if (sortMode === 'title') {
+        return a.title.localeCompare(b.title);
+      }
       if (a.pinned !== b.pinned) {
         return Number(b.pinned) - Number(a.pinned);
       }
       return b.updatedAt - a.updatedAt;
     });
-  }, [notes]);
+  }, [notes, sortMode]);
 
   const visibleNotes = useMemo(() => {
     return sortedNotes.filter((note) => {
@@ -144,9 +165,21 @@ function NoteWorkspace() {
       if (activeFilter.startsWith('tag:') && !note.tags.includes(activeFilter.slice('tag:'.length))) {
         return false;
       }
+      if (quickFilter === 'pinned' && !note.pinned) {
+        return false;
+      }
+      if (quickFilter === 'recent7' && note.updatedAt < Date.now() - 7 * 24 * 60 * 60 * 1000) {
+        return false;
+      }
+      if (quickFilter === 'recent30' && note.updatedAt < Date.now() - 30 * 24 * 60 * 60 * 1000) {
+        return false;
+      }
+      if (quickFilter === 'archived' && note.folderId !== ARCHIVE_FOLDER_ID) {
+        return false;
+      }
       return noteMatches(note, debouncedQuery);
     });
-  }, [sortedNotes, activeFilter, debouncedQuery]);
+  }, [sortedNotes, activeFilter, quickFilter, debouncedQuery]);
 
   const trashCount = useMemo(() => notes.filter((note) => note.deletedAt).length, [notes]);
   const folderCounts = useMemo(() => {
@@ -160,19 +193,19 @@ function NoteWorkspace() {
 
   const listTitle = useMemo(() => {
     if (activeFilter === 'all') {
-      return '全部笔记';
+      return t('filter.allNotes');
     }
     if (activeFilter === 'trash') {
-      return '回收站';
+      return t('filter.trash');
     }
     if (activeFilter.startsWith('folder:')) {
-      return activeFolder?.name || '文件夹';
+      return activeFolder ? getFolderDisplayName(activeFolder, t) : t('filter.folder');
     }
     if (activeFilter.startsWith('tag:')) {
-      return `# ${activeFilter.slice('tag:'.length)}`;
+      return `# ${getTagDisplayName(activeFilter.slice('tag:'.length), t)}`;
     }
-    return '笔记';
-  }, [activeFilter, activeFolder?.name]);
+    return t('filter.notes');
+  }, [activeFilter, activeFolder, t]);
 
   useEffect(() => {
     if (activeNoteId && visibleNotes.some((note) => note.id === activeNoteId)) {
@@ -214,20 +247,20 @@ function NoteWorkspace() {
     }
     setSaveState('saving');
     await updateNote(activeNoteId, {
-      title: draftTitle || '未命名笔记',
+      title: draftTitle || t('note.untitled'),
       content: draftContent,
     });
     setDirty(false);
     setSaveState('saved');
     window.setTimeout(() => setSaveState('idle'), 900);
-  }, [activeNoteId, draftTitle, draftContent]);
+  }, [activeNoteId, draftTitle, draftContent, t]);
 
   const createNewNote = useCallback(async () => {
     const folderId = activeFilter.startsWith('folder:') ? activeFilter.slice('folder:'.length) : DEFAULT_FOLDER_ID;
-    const note = await createNote({ title: '未命名笔记', content: '<p></p>', folderId });
+    const note = await createNote({ title: t('note.untitled'), content: '<p></p>', folderId });
     setActiveFilter(`folder:${folderId}`);
     setActiveNoteId(note.id);
-  }, [activeFilter]);
+  }, [activeFilter, t]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -254,7 +287,7 @@ function NoteWorkspace() {
       }
       if (event.shiftKey && event.key.toLowerCase() === 'c') {
         event.preventDefault();
-        document.querySelector<HTMLButtonElement>('button[aria-label="插入代码块"]')?.click();
+        document.querySelector<HTMLButtonElement>('button[data-editor-insert-code]')?.click();
       }
     }
 
@@ -303,7 +336,7 @@ function NoteWorkspace() {
         let content = item.content;
         const text = await file.text().catch(() => '');
         if (hasRemoteMarkdownImages(text)) {
-          const convert = window.confirm('Markdown 中包含外链图片。是否下载并转存为 Base64？跨域失败的图片将保留原链接。');
+          const convert = window.confirm(t('import.remoteImagesConfirm'));
           if (convert) {
             content = await remoteImagesToBase64(content);
           }
@@ -324,7 +357,7 @@ function NoteWorkspace() {
   }
 
   async function handleCreateFolder() {
-    const folder = await createFolder('新建文件夹');
+    const folder = await createFolder(t('folder.new'));
     setActiveFilter(`folder:${folder.id}`);
     setFolderContextMenu(null);
     setEditingFolderId(folder.id);
@@ -361,7 +394,12 @@ function NoteWorkspace() {
       setFolderContextMenu(null);
       return;
     }
-    const ok = window.confirm(`删除“${folder.name}”？其中的笔记会移动到“资料库”。`);
+    const ok = window.confirm(
+      t('folder.deleteConfirm', {
+        name: getFolderDisplayName(folder, t),
+        target: t('folder.library'),
+      }),
+    );
     if (!ok) {
       setFolderContextMenu(null);
       return;
@@ -417,8 +455,64 @@ function NoteWorkspace() {
   }
 
   return (
-    <div className="h-[100dvh] min-w-[1040px] overflow-hidden bg-paper text-ink">
-      <div className="flex h-full">
+    <div className="grid h-[100dvh] min-w-[1040px] grid-rows-[64px_1fr] overflow-hidden bg-gray-50 text-gray-900">
+      <header className="flex min-w-0 items-center justify-between border-b border-gray-200 bg-white px-5">
+        <button
+          type="button"
+          onClick={() => setActiveFilter('all')}
+          className="flex min-w-0 items-center gap-3 rounded-md text-left outline-none transition focus-visible:ring-2 focus-visible:ring-primary-300"
+          aria-label="MarkNote"
+          title="MarkNote"
+        >
+          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary-600 text-sm font-bold text-white shadow-sm">
+            M
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h1 className="truncate text-base font-semibold leading-tight text-gray-900">MarkNote</h1>
+              <span className="rounded-full bg-primary-50 px-2 py-0.5 text-[11px] font-medium text-primary-700">2.0</span>
+            </div>
+            <p className="truncate text-xs text-gray-500">{t('app.productLabel')}</p>
+          </div>
+        </button>
+
+        <nav className="hidden min-w-0 items-center gap-1 xl:flex" aria-label={t('sidebar.quickAccess')}>
+          <TopNavButton active={activeFilter === 'all'} label={t('filter.allNotes')} onClick={() => setActiveFilter('all')} />
+          <TopNavButton
+            active={activeFilter === `folder:${DEFAULT_FOLDER_ID}`}
+            label={t('folder.library')}
+            onClick={() => setActiveFilter(`folder:${DEFAULT_FOLDER_ID}`)}
+          />
+          <TopNavButton
+            active={activeFilter === `folder:${CODE_FOLDER_ID}`}
+            label={t('folder.codeSnippets')}
+            onClick={() => setActiveFilter(`folder:${CODE_FOLDER_ID}`)}
+          />
+          <TopNavButton
+            active={activeFilter === `folder:${ARCHIVE_FOLDER_ID}`}
+            label={t('folder.archive')}
+            onClick={() => setActiveFilter(`folder:${ARCHIVE_FOLDER_ID}`)}
+          />
+          <TopNavButton active={activeFilter === 'trash'} label={t('filter.trash')} onClick={() => setActiveFilter('trash')} />
+        </nav>
+
+        <div className="flex min-w-0 items-center gap-2 text-xs text-gray-500">
+          <div className="hidden items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1.5 lg:flex">
+            <Command size={14} />
+            <span>{t('app.commandHint')}</span>
+          </div>
+          <div className="hidden items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1.5 md:flex">
+            <Database size={14} className="text-success" />
+            <span>{t('app.syncReady')}</span>
+          </div>
+          <div className="hidden items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1.5 2xl:flex">
+            <Clock3 size={14} className="text-primary-600" />
+            <span>{t('app.performance')}</span>
+          </div>
+        </div>
+      </header>
+
+      <div className="flex min-h-0 overflow-hidden">
         <Sidebar
           query={query}
           folders={folders}
@@ -445,6 +539,7 @@ function NoteWorkspace() {
           onImportClick={() => setShowImport(true)}
           onExportClick={() => setShowExport((value) => !value)}
           searchInputRef={searchInputRef}
+          sync={sync}
         />
         <NoteList
           notes={visibleNotes}
@@ -452,6 +547,11 @@ function NoteWorkspace() {
           activeNoteId={activeNoteId}
           title={listTitle}
           isTrash={activeFilter === 'trash'}
+          sortMode={sortMode}
+          quickFilter={quickFilter}
+          onSortModeChange={setSortMode}
+          onQuickFilterChange={setQuickFilter}
+          onCreateNote={() => void createNewNote()}
           onSelectNote={setActiveNoteId}
           onContextMenu={(event, note) => {
             event.preventDefault();
@@ -461,7 +561,7 @@ function NoteWorkspace() {
           }}
           onRestoreNote={(id) => void restoreNote(id)}
           onDeleteForever={(id) => {
-            if (window.confirm('确定要彻底删除这条笔记吗？')) {
+            if (window.confirm(t('note.deleteForeverConfirm'))) {
               void permanentlyDeleteNote(id);
             }
           }}
@@ -498,6 +598,26 @@ function NoteWorkspace() {
       {showImport ? <ImportDialog onClose={() => setShowImport(false)} onImportFiles={handleImport} /> : null}
       {showExport ? <ExportMenu onClose={() => setShowExport(false)} onExport={(format) => void handleExport(format)} /> : null}
     </div>
+  );
+}
+
+interface TopNavButtonProps {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+}
+
+function TopNavButton({ active, label, onClick }: TopNavButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`h-9 rounded-md px-3 text-sm font-medium transition ${
+        active ? 'bg-primary-50 text-primary-700' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+      }`}
+    >
+      {label}
+    </button>
   );
 }
 

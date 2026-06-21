@@ -1,5 +1,6 @@
 import { Folder, Pin, Tags, Trash2 } from 'lucide-react';
 import { DEFAULT_TAGS } from '../lib/db';
+import { getFolderDisplayName, getTagDisplayName, useI18n } from '../i18n';
 import type { Folder as NoteFolder, Note } from '../types';
 
 interface ContextMenuState {
@@ -19,6 +20,7 @@ interface ContextMenuProps {
 }
 
 export function ContextMenu({ state, folders, onTogglePin, onDelete, onToggleTag, onMoveToFolder }: ContextMenuProps) {
+  const { t } = useI18n();
   const { note, x, y } = state;
   return (
     <div
@@ -31,12 +33,12 @@ export function ContextMenu({ state, folders, onTogglePin, onDelete, onToggleTag
         className="flex h-9 w-full items-center gap-2 px-3 text-left text-stone-700 hover:bg-stone-100"
       >
         <Pin size={15} />
-        {note.pinned ? '取消置顶' : '置顶'}
+        {note.pinned ? t('context.unpin') : t('context.pin')}
       </button>
       <div className="border-t border-stone-100 py-1">
         <div className="flex h-7 items-center gap-2 px-3 text-xs font-medium text-stone-500">
           <Folder size={13} />
-          移动到文件夹
+          {t('context.moveToFolder')}
         </div>
         {folders.map((folder) => (
           <button
@@ -45,7 +47,7 @@ export function ContextMenu({ state, folders, onTogglePin, onDelete, onToggleTag
             onClick={() => onMoveToFolder(note, folder.id)}
             className="flex h-8 w-full items-center justify-between px-3 text-left text-stone-700 hover:bg-stone-100"
           >
-            <span className="truncate">{folder.name}</span>
+            <span className="truncate">{getFolderDisplayName(folder, t)}</span>
             {note.folderId === folder.id ? <span className="h-2 w-2 rounded-full bg-moss" /> : null}
           </button>
         ))}
@@ -53,7 +55,7 @@ export function ContextMenu({ state, folders, onTogglePin, onDelete, onToggleTag
       <div className="border-t border-stone-100 py-1">
         <div className="flex h-7 items-center gap-2 px-3 text-xs font-medium text-stone-500">
           <Tags size={13} />
-          添加标签
+          {t('context.addTag')}
         </div>
         {DEFAULT_TAGS.map((tag) => (
           <button
@@ -62,7 +64,7 @@ export function ContextMenu({ state, folders, onTogglePin, onDelete, onToggleTag
             onClick={() => onToggleTag(note, tag)}
             className="flex h-8 w-full items-center justify-between px-3 text-left text-stone-700 hover:bg-stone-100"
           >
-            <span>{tag}</span>
+            <span>{getTagDisplayName(tag, t)}</span>
             {note.tags.includes(tag) ? <span className="h-2 w-2 rounded-full bg-moss" /> : null}
           </button>
         ))}
@@ -73,7 +75,7 @@ export function ContextMenu({ state, folders, onTogglePin, onDelete, onToggleTag
         className="flex h-9 w-full items-center gap-2 border-t border-stone-100 px-3 text-left text-clay hover:bg-stone-100"
       >
         <Trash2 size={15} />
-        删除
+        {t('context.delete')}
       </button>
     </div>
   );

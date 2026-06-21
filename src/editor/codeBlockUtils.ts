@@ -5,12 +5,15 @@ export const CODE_LANGUAGES = [
   'typescript',
   'python',
   'go',
-  'css',
-  'html',
-  'bash',
-  'json',
-  'markdown',
+  'rust',
+  'java',
+  'csharp',
   'sql',
+  'html',
+  'css',
+  'json',
+  'bash',
+  'markdown',
 ];
 
 export function highlightCodeBlocks(root: ParentNode = document): void {

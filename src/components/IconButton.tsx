@@ -15,8 +15,8 @@ export function IconButton({ icon: Icon, label, active, className = '', ...props
       title={label}
       className={`grid h-8 w-8 place-items-center rounded-md border text-sm transition ${
         active
-          ? 'border-moss bg-moss text-white'
-          : 'border-stone-300 bg-white text-stone-700 hover:border-stone-400 hover:bg-stone-100'
+          ? 'border-primary-600 bg-primary-600 text-white'
+          : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50 hover:text-gray-900'
       } ${className}`}
       {...props}
     >

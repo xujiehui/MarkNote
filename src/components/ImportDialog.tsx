@@ -1,5 +1,6 @@
 import { UploadCloud, X } from 'lucide-react';
 import { useRef, useState } from 'react';
+import { useI18n } from '../i18n';
 
 interface ImportDialogProps {
   onClose: () => void;
@@ -7,6 +8,7 @@ interface ImportDialogProps {
 }
 
 export function ImportDialog({ onClose, onImportFiles }: ImportDialogProps) {
+  const { t } = useI18n();
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -30,13 +32,13 @@ export function ImportDialog({ onClose, onImportFiles }: ImportDialogProps) {
     <div className="fixed inset-0 z-40 grid place-items-center bg-ink/30 p-6">
       <section className="w-full max-w-md rounded-lg border border-stone-200 bg-paper shadow-subtle">
         <header className="flex items-center justify-between border-b border-stone-200 px-5 py-4">
-          <h2 className="text-base font-semibold text-ink">导入笔记</h2>
+          <h2 className="text-base font-semibold text-ink">{t('import.title')}</h2>
           <button
             type="button"
             onClick={onClose}
             className="grid h-8 w-8 place-items-center rounded-md text-stone-500 hover:bg-stone-100"
-            aria-label="关闭"
-            title="关闭"
+            aria-label={t('import.close')}
+            title={t('import.close')}
           >
             <X size={17} />
           </button>
@@ -62,8 +64,8 @@ export function ImportDialog({ onClose, onImportFiles }: ImportDialogProps) {
           >
             <span className="grid justify-items-center gap-3">
               <UploadCloud size={28} className="text-moss" />
-              <span className="text-sm font-medium text-ink">{busy ? '正在导入...' : '拖拽文件到这里或点击选择'}</span>
-              <span className="text-xs text-stone-500">支持 Markdown、HTML、JSON 备份</span>
+              <span className="text-sm font-medium text-ink">{busy ? t('import.busy') : t('import.dropOrChoose')}</span>
+              <span className="text-xs text-stone-500">{t('import.supported')}</span>
             </span>
           </button>
           <input

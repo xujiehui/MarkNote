@@ -4,6 +4,20 @@ export default {
   theme: {
     extend: {
       colors: {
+        primary: {
+          50: '#EFF6FF',
+          100: '#DBEAFE',
+          200: '#BFDBFE',
+          300: '#93C5FD',
+          400: '#60A5FA',
+          500: '#3B82F6',
+          600: '#2563EB',
+          700: '#1D4ED8',
+        },
+        success: '#22C55E',
+        warning: '#F59E0B',
+        error: '#EF4444',
+        info: '#3B82F6',
         ink: '#24221f',
         paper: '#fbfaf7',
         linen: '#f4efe7',

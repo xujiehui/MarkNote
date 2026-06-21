@@ -13,100 +13,90 @@ import {
   Sparkles,
   Tags,
 } from 'lucide-react';
+import { LanguageSwitch } from './components/LanguageSwitch';
+import { useI18n } from './i18n';
 
 const appHref = `${import.meta.env.BASE_URL}?app=1`;
 const repoHref = 'https://github.com/xujiehui/MarkNote';
 const actionsHref = 'https://github.com/xujiehui/MarkNote/actions/workflows/desktop-build.yml';
 
-const features = [
-  {
-    icon: HardDrive,
-    title: 'Local-first storage',
-    description: 'Notes stay in your browser or desktop app storage by default, with no account gate in the writing flow.',
-  },
-  {
-    icon: Image,
-    title: 'Images that belong to the note',
-    description: 'Paste, upload, align, resize, and export Base64 images without leaving the editor.',
-  },
-  {
-    icon: Braces,
-    title: 'Code blocks for real work',
-    description: 'Syntax highlighting, language selection, line numbers, and one-click copy keep snippets usable.',
-  },
-  {
-    icon: FileDown,
-    title: 'Portable import and export',
-    description: 'Move notes as Markdown, HTML, PDF, or JSON backups when your workflow changes.',
-  },
+const featureKeys = [
+  { icon: HardDrive, titleKey: 'landing.featureLocalTitle', descriptionKey: 'landing.featureLocalDesc' },
+  { icon: Image, titleKey: 'landing.featureImagesTitle', descriptionKey: 'landing.featureImagesDesc' },
+  { icon: Braces, titleKey: 'landing.featureCodeTitle', descriptionKey: 'landing.featureCodeDesc' },
+  { icon: FileDown, titleKey: 'landing.featureExportTitle', descriptionKey: 'landing.featureExportDesc' },
 ];
 
-const workflow = ['Capture fragments', 'Shape them into notes', 'Export when they need to travel'];
+const workflowKeys = ['landing.workflowCapture', 'landing.workflowShape', 'landing.workflowExport'];
 
 export function LandingPage() {
+  const { t } = useI18n();
+
   return (
-    <main className="min-h-[100dvh] overflow-hidden bg-[#f9faf8] text-ink">
-      <section className="relative min-h-[92dvh] border-b border-stone-300/70 bg-[#eef1ed]">
+    <main className="w-full overflow-x-hidden bg-[#f9faf8] text-ink">
+      <section className="relative min-h-[92dvh] overflow-hidden border-b border-stone-300/70 bg-[#eef1ed]">
         <div className="absolute inset-x-0 top-0 h-px bg-white/80" />
         <ProductPreview hero />
         <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(238,241,237,0.98)_0%,rgba(238,241,237,0.88)_36%,rgba(238,241,237,0.18)_72%)]" />
-        <nav className="relative z-10 mx-auto flex max-w-7xl items-center justify-between px-5 py-4 md:px-8">
-          <a href={import.meta.env.BASE_URL} className="flex items-center gap-3" aria-label="MarkNote home">
+        <nav className="relative z-10 mx-auto flex max-w-7xl flex-col items-stretch gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between md:px-8">
+          <a href={import.meta.env.BASE_URL} className="flex min-w-0 items-center gap-3" aria-label="MarkNote home">
             <img src={`${import.meta.env.BASE_URL}marknote.svg`} alt="" className="h-9 w-9" />
-            <span className="text-lg font-semibold tracking-[0px] text-ink">MarkNote</span>
+            <span className="truncate text-lg font-semibold tracking-[0px] text-ink">MarkNote</span>
           </a>
           <div className="hidden items-center gap-7 text-sm font-medium text-stone-600 md:flex">
             <a className="transition hover:text-ink" href="#features">
-              Features
+              {t('landing.navFeatures')}
             </a>
             <a className="transition hover:text-ink" href="#platforms">
-              Platforms
+              {t('landing.navPlatforms')}
             </a>
             <a className="transition hover:text-ink" href="#privacy">
-              Privacy
+              {t('landing.navPrivacy')}
             </a>
           </div>
-          <a
-            href={actionsHref}
-            className="inline-flex h-10 items-center gap-2 rounded-md border border-stone-300 bg-white px-3 text-sm font-semibold text-ink shadow-subtle transition hover:border-stone-400 hover:bg-stone-50"
-          >
-            <Download size={16} />
-            Builds
-          </a>
+          <div className="flex w-full items-center justify-between gap-2 sm:ml-auto sm:w-auto sm:justify-end">
+            <LanguageSwitch compact shortLabels />
+            <a
+              href={actionsHref}
+              className="inline-flex h-10 min-w-0 items-center gap-2 rounded-md border border-stone-300 bg-white px-2 text-sm font-semibold text-ink shadow-subtle transition hover:border-stone-400 hover:bg-stone-50 sm:px-3"
+            >
+              <Download size={16} className="shrink-0" />
+              <span className="hidden sm:inline">{t('landing.builds')}</span>
+            </a>
+          </div>
         </nav>
 
-        <div className="relative z-10 mx-auto flex max-w-7xl flex-col justify-center px-5 pb-16 pt-12 md:min-h-[calc(92dvh-73px)] md:px-8 md:pb-20 md:pt-8">
-          <div className="mb-5 inline-flex w-fit items-center gap-2 rounded-md border border-stone-300 bg-white px-3 py-1.5 text-sm font-medium text-stone-600">
-            <Sparkles size={15} />
-            Desktop note workspace for macOS and Windows
+        <div className="relative z-10 mx-auto box-border flex w-full max-w-7xl min-w-0 flex-col justify-center px-5 pb-16 pt-8 md:min-h-[calc(92dvh-73px)] md:px-8 md:pb-20 md:pt-8">
+          <div className="mb-5 flex w-full max-w-full items-start gap-2 rounded-md border border-stone-300 bg-white px-3 py-1.5 text-sm font-medium leading-5 text-stone-600 sm:inline-flex sm:w-fit sm:items-center">
+            <Sparkles size={15} className="shrink-0" />
+            <span className="min-w-0 flex-1 break-words">{t('landing.badge')}</span>
           </div>
           <h1 className="max-w-[11ch] text-5xl font-semibold leading-[0.98] tracking-[0px] text-ink md:text-7xl">
             MarkNote
           </h1>
-          <p className="mt-6 max-w-[58ch] text-lg leading-8 text-stone-700">
-            A calm, local-first writing desk for notes that mix prose, images, code snippets, and portable exports.
-            It opens quickly, stays out of your way, and keeps your work easy to move.
+          <p className="mt-6 max-w-full break-words text-lg leading-8 text-stone-700 md:max-w-[58ch]">
+            {t('landing.heroCopy')}
           </p>
-          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+          <div className="mt-8 flex w-full max-w-full flex-col gap-3 sm:w-auto sm:flex-row">
             <a
               href={appHref}
-              className="inline-flex h-12 items-center justify-center gap-2 rounded-md bg-ink px-5 text-sm font-semibold text-white transition hover:bg-graphite"
+              className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-md bg-ink px-5 text-sm font-semibold text-white transition hover:bg-graphite sm:w-auto"
             >
-              Open web app
+              {t('app.open')}
               <ArrowRight size={17} />
             </a>
             <a
               href={repoHref}
-              className="inline-flex h-12 items-center justify-center gap-2 rounded-md border border-stone-300 bg-white px-5 text-sm font-semibold text-ink transition hover:border-stone-400 hover:bg-stone-50"
+              className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-md border border-stone-300 bg-white px-5 text-sm font-semibold text-ink transition hover:border-stone-400 hover:bg-stone-50 sm:w-auto"
             >
-              View source
+              {t('app.viewSource')}
             </a>
           </div>
-          <div className="mt-8 grid max-w-xl grid-cols-3 gap-2 text-sm text-stone-600">
-            {workflow.map((item, index) => (
-              <div key={item} className="rounded-md border border-stone-300 bg-white/80 px-3 py-2">
+          <div className="mt-8 grid w-full max-w-full grid-cols-1 gap-2 text-sm text-stone-600 sm:max-w-xl sm:grid-cols-3">
+            {workflowKeys.map((key, index) => (
+              <div key={key} className="rounded-md border border-stone-300 bg-white/80 px-3 py-2">
                 <span className="mb-2 block text-xs font-semibold text-moss">0{index + 1}</span>
-                {item}
+                {t(key)}
               </div>
             ))}
           </div>
@@ -116,17 +106,17 @@ export function LandingPage() {
       <section id="features" className="mx-auto max-w-7xl bg-[#f9faf8] px-5 py-16 md:px-8 md:py-20">
         <div className="grid gap-8 md:grid-cols-[0.8fr_1.2fr]">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0px] text-moss">For mixed-format thinking</p>
+            <p className="text-sm font-semibold uppercase tracking-[0px] text-moss">{t('landing.featuresEyebrow')}</p>
             <h2 className="mt-3 max-w-[12ch] text-4xl font-semibold leading-tight tracking-[0px] text-ink md:text-5xl">
-              Everything in one note.
+              {t('landing.featuresTitle')}
             </h2>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
-            {features.map((feature) => (
-              <article key={feature.title} className="rounded-md border border-stone-300 bg-white p-5 shadow-subtle">
+            {featureKeys.map((feature) => (
+              <article key={feature.titleKey} className="rounded-md border border-stone-300 bg-white p-5 shadow-subtle">
                 <feature.icon className="mb-5 text-moss" size={22} />
-                <h3 className="text-lg font-semibold text-ink">{feature.title}</h3>
-                <p className="mt-3 text-sm leading-6 text-stone-600">{feature.description}</p>
+                <h3 className="text-lg font-semibold text-ink">{t(feature.titleKey)}</h3>
+                <p className="mt-3 text-sm leading-6 text-stone-600">{t(feature.descriptionKey)}</p>
               </article>
             ))}
           </div>
@@ -136,20 +126,19 @@ export function LandingPage() {
       <section id="platforms" className="border-y border-stone-300 bg-[#253039] text-white">
         <div className="mx-auto grid max-w-7xl gap-8 px-5 py-16 md:grid-cols-[1fr_1fr] md:px-8">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0px] text-[#9bb889]">GitHub Actions builds</p>
+            <p className="text-sm font-semibold uppercase tracking-[0px] text-[#9bb889]">{t('landing.platformsEyebrow')}</p>
             <h2 className="mt-3 text-4xl font-semibold leading-tight tracking-[0px] text-white md:text-5xl">
-              Packaged for the machines you use.
+              {t('landing.platformsTitle')}
             </h2>
             <p className="mt-5 max-w-[62ch] text-base leading-7 text-stone-200">
-              Every push can produce downloadable artifacts for macOS Intel, macOS Apple Silicon, and Windows x64.
-              The same React workspace powers the web app and the desktop shells.
+              {t('landing.platformsCopy')}
             </p>
           </div>
           <div className="grid content-center gap-3">
             {[
-              ['macOS Intel', 'DMG and ZIP artifacts from macos-15-intel'],
-              ['macOS Apple Silicon', 'Native arm64 package from macos-15'],
-              ['Windows x64', 'NSIS installer and portable executable'],
+              ['macOS Intel', t('landing.macIntelDetail')],
+              ['macOS Apple Silicon', t('landing.macArmDetail')],
+              ['Windows x64', t('landing.winDetail')],
             ].map(([title, detail]) => (
               <div key={title} className="flex items-start gap-4 rounded-md border border-white/12 bg-white/8 p-4 shadow-subtle">
                 <div className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-white text-moss">
@@ -168,18 +157,17 @@ export function LandingPage() {
       <section id="privacy" className="mx-auto grid max-w-7xl gap-8 px-5 py-16 md:grid-cols-[0.9fr_1.1fr] md:px-8 md:py-20">
         <div className="rounded-md border border-stone-300 bg-ink p-6 text-white shadow-subtle">
           <Lock size={24} />
-          <h2 className="mt-8 text-3xl font-semibold leading-tight tracking-[0px]">Private by default, portable by design.</h2>
+          <h2 className="mt-8 text-3xl font-semibold leading-tight tracking-[0px]">{t('landing.privacyTitle')}</h2>
           <p className="mt-4 text-base leading-7 text-stone-200">
-            MarkNote stores notes locally and gives you explicit export routes. It is built for people who want useful
-            software without turning every draft into a cloud object first.
+            {t('landing.privacyCopy')}
           </p>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          {['No login required for the web app', 'IndexedDB local persistence', 'JSON backup export', 'Markdown and HTML import'].map(
-            (item) => (
-              <div key={item} className="flex items-center gap-3 rounded-md border border-stone-300 bg-white p-4">
+          {['landing.privacyNoLogin', 'landing.privacyIndexedDb', 'landing.privacyJson', 'landing.privacyImport'].map(
+            (key) => (
+              <div key={key} className="flex items-center gap-3 rounded-md border border-stone-300 bg-white p-4">
                 <Check className="text-moss" size={18} />
-                <span className="text-sm font-medium text-stone-700">{item}</span>
+                <span className="text-sm font-medium text-stone-700">{t(key)}</span>
               </div>
             ),
           )}
@@ -194,10 +182,10 @@ export function LandingPage() {
           </div>
           <div className="flex gap-5">
             <a className="transition hover:text-ink" href={appHref}>
-              Web app
+              {t('landing.footerWebApp')}
             </a>
             <a className="transition hover:text-ink" href={actionsHref}>
-              Desktop artifacts
+              {t('landing.footerArtifacts')}
             </a>
             <a className="transition hover:text-ink" href={repoHref}>
               GitHub
@@ -210,6 +198,8 @@ export function LandingPage() {
 }
 
 function ProductPreview({ hero = false }: { hero?: boolean }) {
+  const { t } = useI18n();
+
   return (
     <div
       className={
@@ -230,7 +220,7 @@ function ProductPreview({ hero = false }: { hero?: boolean }) {
             <span className="h-3 w-3 rounded-full bg-[#dfb85f]" />
             <span className="h-3 w-3 rounded-full bg-[#6aa76f]" />
           </div>
-          <span className="text-xs font-medium text-stone-500">MarkNote workspace</span>
+          <span className="text-xs font-medium text-stone-500">{t('landing.previewWorkspace')}</span>
         </div>
         <div className="grid min-h-[420px] grid-cols-[120px_150px_minmax(260px,1fr)] bg-paper sm:grid-cols-[150px_190px_minmax(320px,1fr)] lg:grid-cols-[160px_210px_1fr]">
           <aside className="border-r border-stone-200 bg-linen p-4">
@@ -239,23 +229,23 @@ function ProductPreview({ hero = false }: { hero?: boolean }) {
               <div className="font-semibold text-ink">MarkNote</div>
             </div>
             <PreviewSearch />
-            <PreviewNav icon={<Laptop size={15} />} label="All notes" active />
-            <PreviewNav icon={<Tags size={15} />} label="Work" />
-            <PreviewNav icon={<Tags size={15} />} label="Personal" />
+            <PreviewNav icon={<Laptop size={15} />} label={t('landing.previewAllNotes')} active />
+            <PreviewNav icon={<Tags size={15} />} label={t('landing.previewWork')} />
+            <PreviewNav icon={<Tags size={15} />} label={t('landing.previewPersonal')} />
           </aside>
           <section className="border-r border-stone-200 bg-white p-3">
-            <PreviewNote title="Launch checklist" tag="Work" active />
-            <PreviewNote title="Code snippet vault" tag="Code" />
-            <PreviewNote title="Reading notes" tag="Personal" />
+            <PreviewNote title={t('landing.previewLaunchTitle')} tag={t('landing.previewWork')} active />
+            <PreviewNote title={t('landing.previewCodeTitle')} tag={t('tag.codeSnippets')} />
+            <PreviewNote title={t('landing.previewReadingTitle')} tag={t('landing.previewPersonal')} />
           </section>
           <article className="bg-[#fbfaf7] p-5 sm:p-7">
             <div className="mb-4 flex items-center justify-between">
-              <span className="rounded-md bg-moss px-2 py-1 text-xs font-semibold text-white">Work</span>
-              <span className="text-xs text-stone-500">Saved locally</span>
+              <span className="rounded-md bg-moss px-2 py-1 text-xs font-semibold text-white">{t('landing.previewWork')}</span>
+              <span className="text-xs text-stone-500">{t('landing.previewSaved')}</span>
             </div>
-            <h3 className="text-3xl font-semibold tracking-[0px] text-ink">Launch checklist</h3>
+            <h3 className="text-3xl font-semibold tracking-[0px] text-ink">{t('landing.previewLaunchTitle')}</h3>
             <p className="mt-4 max-w-[54ch] text-sm leading-6 text-stone-600">
-              Collect product copy, final screenshots, and release artifacts before publishing the public page.
+              {t('landing.previewCopy')}
             </p>
             <div className="mt-4 rounded-md border border-stone-200 bg-white p-4">
               <div className="mb-3 h-20 rounded-md bg-[linear-gradient(135deg,#4f6f52,#b45f45)]" />
@@ -276,10 +266,12 @@ function ProductPreview({ hero = false }: { hero?: boolean }) {
 }
 
 function PreviewSearch() {
+  const { t } = useI18n();
+
   return (
     <div className="mb-4 flex h-9 items-center gap-2 rounded-md border border-stone-300 bg-white px-3 text-xs text-stone-400">
       <Search size={14} />
-      Search notes
+      {t('landing.previewSearch')}
     </div>
   );
 }
@@ -294,12 +286,14 @@ function PreviewNav({ icon, label, active = false }: { icon: React.ReactNode; la
 }
 
 function PreviewNote({ title, tag, active = false }: { title: string; tag: string; active?: boolean }) {
+  const { t } = useI18n();
+
   return (
     <div className={`mb-3 rounded-md border p-3 ${active ? 'border-moss bg-linen' : 'border-stone-200 bg-white'}`}>
       <div className="text-sm font-semibold text-ink">{title}</div>
       <div className="mt-2 flex items-center justify-between text-xs text-stone-500">
         <span>{tag}</span>
-        <span>2m ago</span>
+        <span>{t('landing.previewAgo')}</span>
       </div>
     </div>
   );

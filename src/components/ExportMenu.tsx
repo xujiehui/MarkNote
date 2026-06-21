@@ -1,4 +1,5 @@
 import { Braces, FileCode2, FileDown, FileText } from 'lucide-react';
+import { useI18n } from '../i18n';
 import type { ExportFormat } from '../types';
 
 interface ExportMenuProps {
@@ -7,6 +8,8 @@ interface ExportMenuProps {
 }
 
 export function ExportMenu({ onExport }: ExportMenuProps) {
+  const { t } = useI18n();
+
   return (
     <div className="fixed bottom-[74px] left-3 z-40 w-[216px] overflow-hidden rounded-md border border-stone-200 bg-white py-1 text-sm shadow-subtle">
       <button
@@ -15,7 +18,7 @@ export function ExportMenu({ onExport }: ExportMenuProps) {
         className="flex h-9 w-full items-center gap-2 px-3 text-left text-stone-700 hover:bg-stone-100"
       >
         <FileCode2 size={15} />
-        导出为 HTML
+        {t('export.html')}
       </button>
       <button
         type="button"
@@ -23,7 +26,7 @@ export function ExportMenu({ onExport }: ExportMenuProps) {
         className="flex h-9 w-full items-center gap-2 px-3 text-left text-stone-700 hover:bg-stone-100"
       >
         <FileDown size={15} />
-        导出为 PDF
+        {t('export.pdf')}
       </button>
       <button
         type="button"
@@ -31,7 +34,7 @@ export function ExportMenu({ onExport }: ExportMenuProps) {
         className="flex h-9 w-full items-center gap-2 px-3 text-left text-stone-700 hover:bg-stone-100"
       >
         <FileText size={15} />
-        导出为 Markdown
+        {t('export.markdown')}
       </button>
       <button
         type="button"
@@ -39,7 +42,7 @@ export function ExportMenu({ onExport }: ExportMenuProps) {
         className="flex h-9 w-full items-center gap-2 border-t border-stone-100 px-3 text-left text-stone-700 hover:bg-stone-100"
       >
         <Braces size={15} />
-        全量 JSON 备份
+        {t('export.json')}
       </button>
     </div>
   );

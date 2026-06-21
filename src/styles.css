@@ -7,10 +7,32 @@
 }
 
 :root {
-  --selection-bg: rgba(79, 111, 82, 0.22);
-  --selection-ink: #1f2a20;
-  --selection-ring: rgba(79, 111, 82, 0.42);
-  --selection-ring-soft: rgba(79, 111, 82, 0.14);
+  --primary-50: #eff6ff;
+  --primary-100: #dbeafe;
+  --primary-200: #bfdbfe;
+  --primary-300: #93c5fd;
+  --primary-400: #60a5fa;
+  --primary-500: #3b82f6;
+  --primary-600: #2563eb;
+  --primary-700: #1d4ed8;
+  --gray-50: #fafafa;
+  --gray-100: #f3f4f6;
+  --gray-200: #e5e7eb;
+  --gray-300: #d1d5db;
+  --gray-400: #9ca3af;
+  --gray-500: #6b7280;
+  --gray-600: #4b5563;
+  --gray-700: #374151;
+  --gray-800: #1f2937;
+  --gray-900: #111827;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --error: #ef4444;
+  --info: #3b82f6;
+  --selection-bg: rgba(59, 130, 246, 0.18);
+  --selection-ink: #111827;
+  --selection-ring: rgba(59, 130, 246, 0.42);
+  --selection-ring-soft: rgba(59, 130, 246, 0.14);
 }
 
 html,
@@ -21,14 +43,16 @@ body,
 
 body {
   margin: 0;
-  background: #fbfaf7;
-  color: #24221f;
+  overflow-x: hidden;
+  background: var(--gray-50);
+  color: var(--gray-900);
   font-family:
-    ui-sans-serif,
-    system-ui,
+    "PingFang SC",
+    "Microsoft YaHei",
     -apple-system,
     BlinkMacSystemFont,
     "Segoe UI",
+    system-ui,
     sans-serif;
 }
 
@@ -49,18 +73,18 @@ button {
 }
 
 .prose-editor ::selection {
-  background: rgba(79, 111, 82, 0.26);
-  color: #1d211d;
+  background: rgba(59, 130, 246, 0.2);
+  color: var(--gray-900);
 }
 
 .prose-editor {
-  min-height: calc(100dvh - 170px);
-  max-width: 920px;
+  min-height: calc(100dvh - 260px);
+  max-width: 900px;
   margin: 0 auto;
   outline: none;
-  color: #24221f;
-  font-size: 16px;
-  line-height: 1.72;
+  color: var(--gray-800);
+  font-size: 18px;
+  line-height: 1.8;
 }
 
 .prose-editor > * + * {
@@ -73,19 +97,20 @@ button {
   margin: 1.2em 0 0.45em;
   line-height: 1.2;
   font-weight: 700;
-  color: #24221f;
+  color: var(--gray-900);
 }
 
 .prose-editor h1 {
-  font-size: 2rem;
+  font-size: 40px;
 }
 
 .prose-editor h2 {
-  font-size: 1.5rem;
+  font-size: 32px;
 }
 
 .prose-editor h3 {
-  font-size: 1.22rem;
+  font-size: 24px;
+  font-weight: 600;
 }
 
 .prose-editor p {
@@ -99,13 +124,13 @@ button {
 
 .prose-editor blockquote {
   margin: 1rem 0;
-  border-left: 4px solid #4f6f52;
+  border-left: 4px solid var(--primary-500);
   padding-left: 1rem;
-  color: #55514a;
+  color: var(--gray-600);
 }
 
 .prose-editor a {
-  color: #4f6f52;
+  color: var(--primary-600);
   text-decoration: underline;
 }
 
@@ -113,9 +138,9 @@ button {
   display: block;
   max-width: 100%;
   height: auto;
-  border: 1px solid rgba(36, 34, 31, 0.1);
-  border-radius: 6px;
-  box-shadow: 0 8px 24px rgba(36, 34, 31, 0.08);
+  border: 1px solid rgba(17, 24, 39, 0.1);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(17, 24, 39, 0.08);
   transition:
     border-color 120ms ease,
     box-shadow 120ms ease;
@@ -125,9 +150,9 @@ button {
   border-color: var(--selection-ring);
   outline: 0;
   box-shadow:
-    0 0 0 2px #fbfaf7,
+    0 0 0 2px #ffffff,
     0 0 0 5px var(--selection-ring),
-    0 12px 32px rgba(36, 34, 31, 0.14);
+    0 12px 32px rgba(17, 24, 39, 0.14);
 }
 
 .prose-editor img[data-align="left"] {
@@ -151,9 +176,9 @@ button {
   margin: 1rem 0;
   overflow-x: auto;
   border-radius: 8px;
-  background: #1e1e1e;
-  color: #f5f5f5;
-  padding: 1rem 1rem 1rem 3.4rem;
+  background: #111827;
+  color: #f9fafb;
+  padding: 2.85rem 1rem 1rem 3.4rem;
   line-height: 1.55;
 }
 
@@ -162,18 +187,23 @@ button {
   min-width: 100%;
   background: transparent;
   color: inherit;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 13px;
   white-space: pre;
 }
 
 .prose-editor pre::before {
-  content: "";
+  content: "JavaScript";
   position: absolute;
-  inset: 0 auto 0 0;
-  width: 2.6rem;
-  border-right: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.03);
+  inset: 0 0 auto 0;
+  height: 2.1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.72);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 2.1rem;
+  padding-left: 0.85rem;
   pointer-events: none;
 }
 
@@ -181,10 +211,10 @@ button {
   content: attr(data-line-numbers);
   position: absolute;
   left: 0;
-  top: 1rem;
+  top: 2.85rem;
   width: 2.6rem;
   color: rgba(255, 255, 255, 0.36);
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 13px;
   line-height: 1.55;
   text-align: right;
@@ -193,12 +223,77 @@ button {
   pointer-events: none;
 }
 
+.prose-editor pre:has(code.language-typescript)::before {
+  content: "TypeScript";
+}
+
+.prose-editor pre:has(code.language-python)::before {
+  content: "Python";
+}
+
+.prose-editor pre:has(code.language-go)::before {
+  content: "Go";
+}
+
+.prose-editor pre:has(code.language-rust)::before {
+  content: "Rust";
+}
+
+.prose-editor pre:has(code.language-java)::before {
+  content: "Java";
+}
+
+.prose-editor pre:has(code.language-csharp)::before,
+.prose-editor pre:has(code.language-cs)::before {
+  content: "C#";
+}
+
+.prose-editor pre:has(code.language-sql)::before {
+  content: "SQL";
+}
+
+.prose-editor pre:has(code.language-html)::before {
+  content: "HTML";
+}
+
+.prose-editor pre:has(code.language-css)::before {
+  content: "CSS";
+}
+
+.prose-editor pre:has(code.language-json)::before {
+  content: "JSON";
+}
+
+.prose-editor pre:has(code.language-mermaid)::before {
+  content: "Mermaid";
+}
+
 .prose-editor code:not(pre code) {
   border-radius: 4px;
-  background: #ece5da;
+  background: var(--primary-50);
   padding: 0.12rem 0.3rem;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  color: var(--primary-700);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 0.9em;
+}
+
+.prose-editor table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 15px;
+}
+
+.prose-editor td,
+.prose-editor th {
+  border: 1px solid var(--gray-200);
+  padding: 0.55rem 0.7rem;
+}
+
+.prose-editor hr {
+  margin: 1.5rem 0;
+  border: 0;
+  border-top: 1px solid var(--gray-200);
 }
 
 .code-copy-button {
@@ -231,11 +326,23 @@ button {
   left: -10000px;
   top: 0;
   width: 900px;
-  background: #fbfaf7;
+  background: #ffffff;
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 1439px) {
   .prose-editor {
     max-width: 760px;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --selection-bg: rgba(96, 165, 250, 0.28);
+    --selection-ink: #f9fafb;
+    --selection-ring: rgba(96, 165, 250, 0.5);
+  }
+
+  body {
+    background: #0f172a;
   }
 }
