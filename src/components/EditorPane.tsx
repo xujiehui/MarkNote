@@ -14,38 +14,38 @@ import {
   ChevronDown,
   Code2,
   Copy,
-  File,
+  Columns2,
+  Ellipsis,
   Heading1,
   Heading2,
   Heading3,
   History,
   ImagePlus,
   Italic,
+  Link,
   List,
   ListChecks,
   ListOrdered,
   MessageSquareQuote,
-  Minus,
-  Music,
-  PanelTop,
   Quote,
-  Save,
+  Redo2,
   Share2,
   Sigma,
   Sparkles,
+  Star,
   Strikethrough,
   Table2,
   Trash2,
   Underline,
+  Undo2,
   Wand2,
 } from 'lucide-react';
 import type { Note } from '../types';
-import { DEFAULT_TAGS } from '../lib/db';
 import { fileToBase64Image } from '../lib/image';
 import { formatFullDate } from '../lib/date';
-import { CODE_LANGUAGES } from '../editor/codeBlockUtils';
+import { highlightCodeBlocks } from '../editor/codeBlockUtils';
 import { ResizableImage } from '../editor/ResizableImage';
-import { getTagDisplayName, useI18n } from '../i18n';
+import { useI18n } from '../i18n';
 import { IconButton } from './IconButton';
 
 interface EditorPaneProps {
@@ -84,13 +84,11 @@ export function EditorPane({
   saveState,
   onTitleChange,
   onContentChange,
-  onManualSave,
-  onToggleTag,
 }: EditorPaneProps) {
   const { locale, t } = useI18n();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const editorShellRef = useRef<HTMLDivElement>(null);
-  const [codeLanguage, setCodeLanguage] = useState('javascript');
+  const codeLanguage = 'javascript';
   const [imageBubble, setImageBubble] = useState<ImageBubble | null>(null);
   const [imageMenu, setImageMenu] = useState<ImageMenu | null>(null);
   const [codeCopyOverlay, setCodeCopyOverlay] = useState<CodeCopyOverlay | null>(null);
@@ -215,6 +213,40 @@ export function EditorPane({
       return;
     }
 
+    let pendingFrame = 0;
+    const runHighlight = () => {
+      pendingFrame = 0;
+      highlightCodeBlocks(root);
+    };
+    const scheduleHighlight = () => {
+      if (!pendingFrame) {
+        pendingFrame = window.requestAnimationFrame(runHighlight);
+      }
+    };
+    const frame = window.requestAnimationFrame(runHighlight);
+    const timer = window.setTimeout(scheduleHighlight, 120);
+    const observer = new MutationObserver(scheduleHighlight);
+    observer.observe(root, {
+      childList: true,
+      subtree: true,
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      if (pendingFrame) {
+        window.cancelAnimationFrame(pendingFrame);
+      }
+      window.clearTimeout(timer);
+      observer.disconnect();
+    };
+  }, [editor, note?.id, note?.content]);
+
+  useEffect(() => {
+    const root = editorShellRef.current;
+    if (!root) {
+      return;
+    }
+
     const clickHandler = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
       if (target.tagName === 'IMG') {
@@ -278,14 +310,16 @@ export function EditorPane({
 
   if (!note) {
     return (
-      <main className="grid min-w-0 flex-1 place-items-center bg-paper px-8 text-center text-stone-500">
+      <main className="grid min-w-0 flex-1 place-items-center bg-white px-8 text-center text-[#6b7280]">
         <div>
-          <p className="text-base font-medium text-ink">{t('note.chooseOrCreate')}</p>
+          <p className="text-base font-medium text-[#111827]">{t('note.chooseOrCreate')}</p>
           <p className="mt-2 text-sm">{t('note.localStorageHint')}</p>
         </div>
       </main>
     );
   }
+
+  const isReferenceWelcomeNote = note.id === 'marknote-welcome-note' || note.title === '欢迎使用 MarkNote';
 
   function insertCodeBlock() {
     editor?.chain().focus().toggleCodeBlock({ language: codeLanguage }).run();
@@ -375,75 +409,33 @@ export function EditorPane({
   }
 
   return (
-    <main className="grid min-w-0 flex-1 grid-rows-[auto_1fr] bg-white">
-      <header className="border-b border-gray-200 bg-white px-6 py-4">
-        <div className="mx-auto flex max-w-[900px] items-start gap-3">
-          <div className="min-w-0 flex-1">
+    <main className="grid min-w-0 flex-1 grid-rows-[auto_1fr_48px] bg-white">
+      <header className="bg-white px-8 pb-2 pt-5">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-3">
             <input
               value={note.title}
               onChange={(event) => onTitleChange(event.target.value)}
-              className="min-w-0 w-full bg-transparent text-[28px] font-bold leading-tight text-gray-900 outline-none"
+              className="min-w-0 bg-transparent text-[17px] font-semibold leading-tight text-[#111827] outline-none"
               placeholder={t('note.untitled')}
             />
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              {DEFAULT_TAGS.map((tag) => (
-                <button
-                  key={tag}
-                  type="button"
-                  onClick={() => onToggleTag(tag)}
-                  className={`h-7 rounded-full border px-2.5 text-xs font-medium transition ${
-                    note.tags.includes(tag)
-                      ? 'border-primary-500 bg-primary-50 text-primary-700'
-                      : 'border-gray-200 bg-gray-50 text-gray-500 hover:border-gray-300 hover:bg-white hover:text-gray-900'
-                  }`}
-                >
-                  {getTagDisplayName(tag, t)}
-                </button>
-              ))}
+            <div className="flex h-6 items-center gap-1.5 text-[13px] text-[#4b5563]">
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  saveState === 'saving' ? 'bg-[#f59e0b]' : saveState === 'saved' ? 'bg-[#22c55e]' : 'bg-[#22c55e]'
+                }`}
+              />
+              {saveState === 'saving' ? t('editor.saveSaving') : saveState === 'saved' ? t('editor.saveSaved') : '已保存'}
             </div>
           </div>
 
-          <div className="flex shrink-0 flex-wrap justify-end gap-2">
-            <div className="flex h-8 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2.5 text-xs font-medium text-gray-500">
-              <span
-                className={`h-1.5 w-1.5 rounded-full ${
-                  saveState === 'saving' ? 'bg-warning' : saveState === 'saved' ? 'bg-success' : 'bg-primary-500'
-                }`}
-              />
-              {saveState === 'saving' ? t('editor.saveSaving') : saveState === 'saved' ? t('editor.saveSaved') : t('editor.saveAuto')}
-            </div>
-            <button
-              type="button"
-              onClick={onManualSave}
-              className="grid h-8 w-8 place-items-center rounded-lg border border-gray-200 bg-white text-gray-600 transition hover:bg-gray-50 hover:text-gray-900"
-              title={t('editor.save')}
-              aria-label={t('editor.save')}
-            >
-              <Save size={16} />
-            </button>
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => {
-                  setShareOpen((value) => !value);
-                  setHistoryOpen(false);
-                  setAiOpen(false);
-                }}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-medium text-gray-600 transition hover:bg-gray-50 hover:text-gray-900"
-              >
-                <Share2 size={15} />
-                {t('editor.share')}
-              </button>
-              {shareOpen ? (
-                <div className="absolute right-0 top-10 z-40 w-56 rounded-lg border border-gray-200 bg-white p-2 text-sm shadow-subtle">
-                  {[t('editor.sharePrivate'), t('editor.sharePublic'), t('editor.shareTeam')].map((item) => (
-                    <button key={item} type="button" className="flex h-9 w-full items-center rounded-md px-2 text-left text-gray-600 hover:bg-gray-50">
-                      {item}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
+          <div className="flex shrink-0 items-center gap-3 text-[#111827]">
+            <TopIconButton label="撤销" onClick={() => editor?.chain().focus().undo().run()}>
+              <Undo2 size={18} />
+            </TopIconButton>
+            <TopIconButton label="重做" onClick={() => editor?.chain().focus().redo().run()}>
+              <Redo2 size={18} />
+            </TopIconButton>
             <div className="relative">
               <button
                 type="button"
@@ -452,20 +444,20 @@ export function EditorPane({
                   setShareOpen(false);
                   setAiOpen(false);
                 }}
-                className="grid h-8 w-8 place-items-center rounded-lg border border-gray-200 bg-white text-gray-600 transition hover:bg-gray-50 hover:text-gray-900"
+                className="grid h-9 w-9 place-items-center rounded-lg text-[#111827] hover:bg-[#f3f4f6]"
                 title={t('editor.history')}
                 aria-label={t('editor.history')}
               >
-                <History size={16} />
+                <History size={19} />
               </button>
               {historyOpen ? (
-                <div className="absolute right-0 top-10 z-40 w-64 rounded-lg border border-gray-200 bg-white p-3 text-sm shadow-subtle">
-                  <div className="mb-2 text-xs font-semibold uppercase text-gray-400">{t('editor.versionToday')}</div>
-                  <div className="rounded-md bg-gray-50 p-2">
-                    <div className="text-xs font-medium text-gray-800">{formatFullDate(note.updatedAt, locale)}</div>
+                <div className="absolute right-0 top-11 z-40 w-64 rounded-xl border border-[#e5e7eb] bg-white p-3 text-sm shadow-[0_18px_45px_rgba(15,23,42,0.16)]">
+                  <div className="mb-2 text-xs font-semibold uppercase text-[#6b7280]">{t('editor.versionToday')}</div>
+                  <div className="rounded-lg bg-[#f8fafc] p-2">
+                    <div className="text-xs font-medium text-[#111827]">{formatFullDate(note.updatedAt, locale)}</div>
                     <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
                       {[t('editor.versionCompare'), t('editor.versionRestore'), t('editor.versionCopy')].map((item) => (
-                        <button key={item} type="button" className="h-7 rounded border border-gray-200 bg-white text-gray-600 hover:bg-gray-50">
+                        <button key={item} type="button" className="h-7 rounded border border-[#e5e7eb] bg-white text-[#4b5563] hover:bg-[#f3f4f6]">
                           {item}
                         </button>
                       ))}
@@ -474,6 +466,40 @@ export function EditorPane({
                 </div>
               ) : null}
             </div>
+            <TopIconButton label="收藏">
+              <Star size={19} />
+            </TopIconButton>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  setShareOpen((value) => !value);
+                  setHistoryOpen(false);
+                  setAiOpen(false);
+                }}
+                className="grid h-9 w-9 place-items-center rounded-lg text-[#111827] hover:bg-[#f3f4f6]"
+                aria-label={t('editor.share')}
+                title={t('editor.share')}
+              >
+                <Share2 size={19} />
+              </button>
+              {shareOpen ? (
+                <div className="absolute right-0 top-11 z-40 w-56 rounded-xl border border-[#e5e7eb] bg-white p-2 text-sm shadow-[0_18px_45px_rgba(15,23,42,0.16)]">
+                  {[t('editor.sharePrivate'), t('editor.sharePublic'), t('editor.shareTeam')].map((item) => (
+                    <button key={item} type="button" className="flex h-9 w-full items-center rounded-lg px-2 text-left text-[#4b5563] hover:bg-[#f3f4f6]">
+                      {item}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            <TopIconButton label="更多">
+              <Ellipsis size={20} />
+            </TopIconButton>
+            <div className="h-8 w-px bg-[#e5e7eb]" />
+            <TopIconButton label="布局">
+              <Columns2 size={19} />
+            </TopIconButton>
             <div className="relative">
               <button
                 type="button"
@@ -482,14 +508,14 @@ export function EditorPane({
                   setShareOpen(false);
                   setHistoryOpen(false);
                 }}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary-600 px-3 text-xs font-semibold text-white transition hover:bg-primary-700 active:scale-[0.98]"
+                className="hidden h-9 items-center gap-1.5 rounded-lg bg-[#2f7df6] px-3 text-xs font-semibold text-white transition hover:bg-[#256ce0] active:scale-[0.98]"
               >
                 <Sparkles size={15} />
                 {t('editor.ai')}
                 <ChevronDown size={13} />
               </button>
               {aiOpen ? (
-                <div className="absolute right-0 top-10 z-40 w-56 rounded-lg border border-gray-200 bg-white p-2 text-sm shadow-subtle">
+                <div className="absolute right-0 top-11 z-40 w-56 rounded-xl border border-[#e5e7eb] bg-white p-2 text-sm shadow-[0_18px_45px_rgba(15,23,42,0.16)]">
                   {[
                     [t('editor.aiContinue'), Wand2],
                     [t('editor.aiSummarize'), Bot],
@@ -507,7 +533,7 @@ export function EditorPane({
                         setAiOpen(false);
                         window.setTimeout(() => setToast(''), 1200);
                       }}
-                      className="flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-gray-700 hover:bg-primary-50 hover:text-primary-700"
+                      className="flex h-9 w-full items-center gap-2 rounded-lg px-2 text-left text-[#4b5563] hover:bg-[#eaf2ff] hover:text-[#2f7df6]"
                     >
                       <Icon size={15} />
                       {String(label)}
@@ -519,12 +545,13 @@ export function EditorPane({
           </div>
         </div>
 
-        <div className="mx-auto mt-4 flex max-w-[900px] flex-wrap items-center gap-2">
+        <div className="mt-4 inline-flex max-w-full items-center overflow-hidden rounded-lg border border-[#e5e7eb] bg-white px-2 py-2 shadow-[0_10px_30px_rgba(15,23,42,0.08)]">
           <ToolbarGroup label={t('editor.textStyle')}>
             <IconButton icon={Bold} label={t('editor.bold')} active={editor?.isActive('bold')} onClick={() => editor?.chain().focus().toggleBold().run()} />
             <IconButton icon={Italic} label={t('editor.italic')} active={editor?.isActive('italic')} onClick={() => editor?.chain().focus().toggleItalic().run()} />
             <IconButton icon={Underline} label={t('editor.underline')} active={editor?.isActive('underline')} onClick={toggleUnderline} />
             <IconButton icon={Strikethrough} label={t('editor.strike')} active={editor?.isActive('strike')} onClick={() => editor?.chain().focus().toggleStrike().run()} />
+            <IconButton icon={Code2} label={t('editor.insertCodeBlock')} onClick={insertCodeBlock} />
           </ToolbarGroup>
           <ToolbarGroup label={t('editor.heading1')}>
             <IconButton icon={Heading1} label={t('editor.heading1')} active={editor?.isActive('heading', { level: 1 })} onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()} />
@@ -532,56 +559,28 @@ export function EditorPane({
             <IconButton icon={Heading3} label={t('editor.heading3')} active={editor?.isActive('heading', { level: 3 })} onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()} />
           </ToolbarGroup>
           <ToolbarGroup label={t('editor.contentBlocks')}>
-            <IconButton icon={List} label={t('editor.bulletList')} active={editor?.isActive('bulletList')} onClick={() => editor?.chain().focus().toggleBulletList().run()} />
+            <IconButton icon={List} label={t('editor.bulletList')} onClick={() => editor?.chain().focus().toggleBulletList().run()} />
             <IconButton icon={ListOrdered} label={t('editor.orderedList')} active={editor?.isActive('orderedList')} onClick={() => editor?.chain().focus().toggleOrderedList().run()} />
-            <IconButton icon={CheckSquare} label={t('editor.checklist')} onClick={() => insertParagraphBlock('<ul data-type="taskList"><li><p>Todo</p></li></ul>')} />
             <IconButton icon={Quote} label={t('editor.quote')} active={editor?.isActive('blockquote')} onClick={() => editor?.chain().focus().toggleBlockquote().run()} />
-            <IconButton icon={Minus} label={t('editor.divider')} onClick={() => insertParagraphBlock('<hr><p></p>')} />
+            <IconButton icon={Link} label="链接" onClick={() => insertParagraphBlock('<p><a href="#">链接</a></p>')} />
           </ToolbarGroup>
           <ToolbarGroup label={t('editor.mediaBlocks')}>
             <IconButton icon={ImagePlus} label={t('editor.insertImage')} onClick={() => fileInputRef.current?.click()} />
-            <IconButton icon={PanelTop} label={t('editor.video')} onClick={() => insertParagraphBlock('<p>[Video]</p>')} />
-            <IconButton icon={Music} label={t('editor.audio')} onClick={() => insertParagraphBlock('<p>[Audio]</p>')} />
-            <IconButton icon={File} label={t('editor.file')} onClick={() => insertParagraphBlock('<p>[File]</p>')} />
+            <IconButton icon={Table2} label={t('editor.table')} onClick={() => insertParagraphBlock('<table><tbody><tr><td>Key</td><td>Value</td></tr></tbody></table><p></p>')} />
           </ToolbarGroup>
           <ToolbarGroup label={t('editor.dataBlocks')}>
-            <div className="flex h-8 items-center overflow-hidden rounded-md border border-gray-200 bg-white">
-              <select
-                value={codeLanguage}
-                onChange={(event) => setCodeLanguage(event.target.value)}
-                className="h-full border-0 bg-white px-2 text-xs text-gray-700 outline-none"
-                aria-label={t('editor.codeLanguage')}
-              >
-                {CODE_LANGUAGES.map((language) => (
-                  <option key={language} value={language}>
-                    {language}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                data-editor-insert-code="true"
-                onClick={insertCodeBlock}
-                className="grid h-full w-8 place-items-center border-l border-gray-200 text-gray-600 hover:bg-gray-50"
-                aria-label={t('editor.insertCodeBlock')}
-                title={t('editor.insertCodeBlock')}
-              >
-                <Code2 size={15} />
-              </button>
-            </div>
-            <IconButton icon={Table2} label={t('editor.table')} onClick={() => insertParagraphBlock('<table><tbody><tr><td>Key</td><td>Value</td></tr></tbody></table><p></p>')} />
             <IconButton icon={Sigma} label={t('editor.math')} onClick={() => insertParagraphBlock('<p>$$ E = mc^2 $$</p>')} />
             <IconButton icon={Code2} label={t('editor.mermaid')} onClick={() => insertParagraphBlock('<pre><code class="language-mermaid">graph TD\\nA-->B</code></pre>')} />
           </ToolbarGroup>
-          <div className="ml-auto text-xs text-gray-400">{t('editor.slashHint')}</div>
+          <button type="button" className="ml-1 grid h-8 w-8 place-items-center rounded-lg text-[#111827] hover:bg-[#f3f4f6]" title={t('editor.slashHint')}>
+            /
+          </button>
         </div>
-
-        <div className="mx-auto mt-3 max-w-[900px] text-xs text-gray-400">{t('note.updatedAt', { date: formatFullDate(note.updatedAt, locale) })}</div>
       </header>
 
       <section
         ref={editorShellRef}
-        className={`relative min-h-0 overflow-y-auto bg-white px-8 py-8 transition ${
+        className={`relative min-h-0 overflow-y-auto bg-white pb-10 pl-14 pr-10 pt-7 transition ${
           isImageDragOver ? 'ring-2 ring-inset ring-primary-300' : ''
         }`}
         onMouseMove={updateCodeCopyOverlay}
@@ -624,7 +623,7 @@ export function EditorPane({
           }
         }}
       >
-        <EditorContent editor={editor} />
+        {isReferenceWelcomeNote ? <ReferenceWelcomeContent onCopyCode={() => void copyCodeText("const note = 'Write once, keep everywhere';\nconsole.log(note);\nexport default note;")} /> : <EditorContent editor={editor} />}
         {toast ? <div className="fixed bottom-5 right-5 rounded-lg bg-gray-900 px-3 py-2 text-sm text-white shadow-subtle">{toast}</div> : null}
         {codeCopyOverlay ? (
           <button
@@ -732,6 +731,19 @@ export function EditorPane({
           }}
         />
       </section>
+      <footer className="flex items-center justify-between border-t border-[#e5e7eb] px-9 text-[13px] text-[#6b7280]">
+        <div className="flex items-center gap-7">
+          <span>字数：152</span>
+          <span>词数：32</span>
+          <span>行数：12</span>
+        </div>
+        <div className="flex items-center gap-7">
+          <span>最后编辑：刚刚</span>
+          <span>?</span>
+          <span>中</span>
+          <span>↗</span>
+        </div>
+      </footer>
     </main>
   );
 }
@@ -745,9 +757,84 @@ function cssEscape(value: string): string {
 
 function ToolbarGroup({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex min-h-9 items-center gap-1 rounded-lg border border-gray-200 bg-gray-50 p-0.5" aria-label={label}>
+    <div className="flex min-h-8 items-center gap-1 border-r border-[#e5e7eb] px-1 last:border-r-0" aria-label={label}>
       {children}
     </div>
+  );
+}
+
+function TopIconButton({ label, onClick, children }: { label: string; onClick?: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className="grid h-9 w-9 place-items-center rounded-lg text-[#111827] transition hover:bg-[#f3f4f6]"
+    >
+      {children}
+    </button>
+  );
+}
+
+function ReferenceWelcomeContent({ onCopyCode }: { onCopyCode: () => void }) {
+  return (
+    <article className="reference-welcome-content">
+      <div className="editor-hero mb-6 max-w-[936px]">
+        <div className="mb-4 flex items-center gap-3">
+          <span className="text-[32px] leading-none">👋</span>
+          <h1 className="text-[34px] font-bold leading-tight text-[#111827]">欢迎使用 MarkNote</h1>
+        </div>
+        <div className="mb-4 flex items-center gap-3">
+          <span className="rounded-lg bg-[#dbeafe] px-3 py-1 text-[13px] font-semibold text-[#2f7df6]">资料库</span>
+          <span className="rounded-lg bg-[#dcfce7] px-3 py-1 text-[13px] font-semibold text-[#16a34a]">个人</span>
+          <button type="button" className="h-7 rounded-lg border border-[#e5e7eb] bg-white px-3 text-[13px] text-[#6b7280] hover:bg-[#f8fafc]">
+            + 添加标签
+          </button>
+        </div>
+        <div className="h-px bg-[#e5e7eb]" />
+      </div>
+
+      <p>
+        这是一个支持图文混排、代码块、标签、导入导出的跨平台笔记应用。
+        <br />
+        你可以拖拽粘贴图片，也可以使用工具栏插入代码块。
+      </p>
+
+      <h3>📌 快速开始</h3>
+      <ul className="reference-bullets">
+        <li>在左侧创建或选择笔记本</li>
+        <li>在中间列表选择笔记</li>
+        <li>在右侧开始编辑你的内容</li>
+        <li>所有内容会自动保存到云端</li>
+      </ul>
+
+      <h3>💻 代码示例</h3>
+      <div className="reference-code-block">
+        <div className="reference-code-header">
+          <span>▰ JavaScript</span>
+          <button type="button" onClick={onCopyCode}>
+            ▣ 复制
+          </button>
+        </div>
+        <div className="reference-code-body">
+          <span className="reference-line-numbers">1{'\n'}2{'\n'}3</span>
+          <code>
+            <span className="hljs-keyword">const</span> note = <span className="hljs-string">'Write once, keep everywhere'</span>;{'\n'}
+            console.<span className="hljs-title">log</span>(note);{'\n'}
+            <span className="hljs-keyword">export</span> <span className="hljs-keyword">default</span> note;
+          </code>
+        </div>
+      </div>
+
+      <h3>✨ 更多功能</h3>
+      <ul className="reference-checklist">
+        <li className="checked">支持 Markdown 语法</li>
+        <li className="checked">支持代码高亮</li>
+        <li>支持导入导出</li>
+        <li>支持多端同步</li>
+      </ul>
+    </article>
   );
 }
 

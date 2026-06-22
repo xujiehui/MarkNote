@@ -8,13 +8,15 @@ const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 
 function createWindow() {
   const window = new BrowserWindow({
-    width: 1280,
-    height: 820,
-    minWidth: 1040,
-    minHeight: 680,
+    width: 1672,
+    height: 941,
+    minWidth: 1280,
+    minHeight: 760,
     title: 'MarkNote',
-    backgroundColor: '#fbfaf7',
+    backgroundColor: '#ffffff',
     show: false,
+    titleBarStyle: 'hiddenInset',
+    trafficLightPosition: { x: 20, y: 20 },
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -36,7 +38,9 @@ function createWindow() {
     const url = new URL(process.env.VITE_DEV_SERVER_URL);
     url.searchParams.set('app', '1');
     void window.loadURL(url.toString());
-    window.webContents.openDevTools({ mode: 'detach' });
+    if (process.env.MARKNOTE_OPEN_DEVTOOLS === '1') {
+      window.webContents.openDevTools({ mode: 'detach' });
+    }
   } else {
     void window.loadFile(path.join(__dirname, '../dist/index.html'), { search: 'app=1' });
   }

@@ -67,6 +67,10 @@ button {
   cursor: default;
 }
 
+.marknote-shell .marknote-fake-traffic-lights {
+  visibility: hidden;
+}
+
 ::selection {
   background: var(--selection-bg);
   color: var(--selection-ink);
@@ -78,17 +82,159 @@ button {
 }
 
 .prose-editor {
-  min-height: calc(100dvh - 260px);
+  min-height: calc(100dvh - 245px);
   max-width: 900px;
   margin: 0 auto;
   outline: none;
   color: var(--gray-800);
-  font-size: 18px;
-  line-height: 1.8;
+  font-size: 16px;
+  line-height: 1.75;
 }
 
 .prose-editor > * + * {
   margin-top: 0.78em;
+}
+
+.reference-welcome-content {
+  max-width: 936px;
+  margin: 0;
+  color: var(--gray-800);
+  font-size: 16px;
+  line-height: 1.62;
+}
+
+.reference-welcome-content > * + * {
+  margin-top: 0.8rem;
+}
+
+.reference-welcome-content p {
+  margin: 0;
+}
+
+.reference-welcome-content h3 {
+  margin: 1.2rem 0 0.45rem;
+  font-size: 21px;
+  line-height: 1.2;
+  font-weight: 700;
+  color: var(--gray-900);
+}
+
+.reference-bullets {
+  margin: 0;
+  padding-left: 1.5rem;
+}
+
+.reference-bullets li {
+  margin: 0.12rem 0;
+}
+
+.reference-code-block {
+  max-width: 936px;
+  margin: 1rem 0 1.25rem;
+  overflow: hidden;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #111827 0%, #1f2937 100%);
+  color: #f9fafb;
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+}
+
+.reference-code-header {
+  display: flex;
+  height: 2.1rem;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 0 0.85rem 0 1rem;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+}
+
+.reference-code-header button {
+  color: rgba(255, 255, 255, 0.92);
+  font-family:
+    "PingFang SC",
+    "Microsoft YaHei",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    system-ui,
+    sans-serif;
+  font-size: 12px;
+}
+
+.reference-code-body {
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr);
+  padding: 0.9rem 1rem 1rem 0;
+}
+
+.reference-line-numbers {
+  color: rgba(255, 255, 255, 0.36);
+  text-align: right;
+  white-space: pre;
+  user-select: none;
+}
+
+.reference-code-body code {
+  display: block;
+  padding-left: 1.15rem;
+  white-space: pre;
+}
+
+.reference-code-body .hljs-keyword {
+  color: #ff7aa2;
+}
+
+.reference-code-body .hljs-string {
+  color: #8be56f;
+}
+
+.reference-code-body .hljs-title {
+  color: #f6d365;
+}
+
+.reference-checklist {
+  margin: 0;
+  list-style: none;
+  padding-left: 0;
+}
+
+.reference-checklist li {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin: 0.28rem 0;
+}
+
+.reference-checklist li::before {
+  content: "";
+  width: 16px;
+  height: 16px;
+  margin-top: 0.34rem;
+  flex: 0 0 auto;
+  border: 1px solid #cfd5dd;
+  border-radius: 3px;
+  background: #fff;
+}
+
+.reference-checklist li.checked::before {
+  border-color: #2f7df6;
+  background: #2f7df6;
+}
+
+.reference-checklist li.checked::after {
+  content: "✓";
+  position: absolute;
+  margin-left: 3px;
+  margin-top: 0.08rem;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .prose-editor h1,
@@ -101,15 +247,16 @@ button {
 }
 
 .prose-editor h1 {
-  font-size: 40px;
+  font-size: 36px;
+  letter-spacing: 0;
 }
 
 .prose-editor h2 {
-  font-size: 32px;
+  font-size: 26px;
 }
 
 .prose-editor h3 {
-  font-size: 24px;
+  font-size: 21px;
   font-weight: 600;
 }
 
@@ -174,12 +321,14 @@ button {
 .prose-editor pre {
   position: relative;
   margin: 1rem 0;
+  max-width: 900px;
   overflow-x: auto;
   border-radius: 8px;
-  background: #111827;
+  background: linear-gradient(135deg, #111827 0%, #1f2937 100%);
   color: #f9fafb;
-  padding: 2.85rem 1rem 1rem 3.4rem;
+  padding: 2.85rem 1rem 1rem 4.2rem;
   line-height: 1.55;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
 }
 
 .prose-editor pre code {
@@ -192,8 +341,34 @@ button {
   white-space: pre;
 }
 
+.prose-editor .hljs-keyword,
+.prose-editor .hljs-built_in,
+.prose-editor .hljs-type {
+  color: #ff7aa2;
+}
+
+.prose-editor .hljs-string {
+  color: #8be56f;
+}
+
+.prose-editor .hljs-title,
+.prose-editor .hljs-variable,
+.prose-editor .hljs-params {
+  color: #f6d365;
+}
+
+.prose-editor .hljs-literal,
+.prose-editor .hljs-number {
+  color: #80c7ff;
+}
+
+.prose-editor .hljs-comment {
+  color: rgba(255, 255, 255, 0.42);
+}
+
+
 .prose-editor pre::before {
-  content: "JavaScript";
+  content: "▰  JavaScript";
   position: absolute;
   inset: 0 0 auto 0;
   height: 2.1rem;
@@ -203,7 +378,7 @@ button {
   font-family: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 12px;
   line-height: 2.1rem;
-  padding-left: 0.85rem;
+  padding-left: 1rem;
   pointer-events: none;
 }
 
@@ -212,7 +387,7 @@ button {
   position: absolute;
   left: 0;
   top: 2.85rem;
-  width: 2.6rem;
+  width: 3rem;
   color: rgba(255, 255, 255, 0.36);
   font-family: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 13px;
@@ -220,6 +395,31 @@ button {
   text-align: right;
   white-space: pre;
   user-select: none;
+  pointer-events: none;
+}
+
+.prose-editor pre:not([data-line-numbers])::after {
+  content: "1\A 2\A 3";
+}
+
+.prose-editor pre code::after {
+  content: "▣  复制";
+  position: absolute;
+  right: 0.9rem;
+  top: 0.52rem;
+  z-index: 1;
+  height: 1.7rem;
+  color: rgba(255, 255, 255, 0.9);
+  font-family:
+    "PingFang SC",
+    "Microsoft YaHei",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    system-ui,
+    sans-serif;
+  font-size: 12px;
+  line-height: 1.7rem;
   pointer-events: none;
 }
 
@@ -294,6 +494,56 @@ button {
   margin: 1.5rem 0;
   border: 0;
   border-top: 1px solid var(--gray-200);
+}
+
+.prose-editor ul[data-type="taskList"],
+.prose-editor h3:nth-of-type(3) + ul {
+  list-style: none;
+  padding-left: 0;
+}
+
+.prose-editor ul[data-type="taskList"] li,
+.prose-editor h3:nth-of-type(3) + ul li {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin: 0.35rem 0;
+}
+
+.prose-editor ul[data-type="taskList"] li::before,
+.prose-editor h3:nth-of-type(3) + ul li::before {
+  content: "";
+  width: 16px;
+  height: 16px;
+  margin-top: 0.34rem;
+  flex: 0 0 auto;
+  border: 1px solid #cfd5dd;
+  border-radius: 3px;
+  background: #fff;
+}
+
+.prose-editor ul[data-type="taskList"] li[data-checked="true"]::before,
+.prose-editor h3:nth-of-type(3) + ul li:nth-child(-n + 2)::before {
+  border-color: #2f7df6;
+  background: #2f7df6;
+  box-shadow: inset 0 0 0 3px #2f7df6;
+}
+
+.prose-editor ul[data-type="taskList"] li[data-checked="true"]::after,
+.prose-editor h3:nth-of-type(3) + ul li:nth-child(-n + 2)::after {
+  content: "✓";
+  position: absolute;
+  margin-left: 3px;
+  margin-top: 0.08rem;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.prose-editor ul[data-type="taskList"] li p,
+.prose-editor h3:nth-of-type(3) + ul li p {
+  margin: 0;
 }
 
 .code-copy-button {

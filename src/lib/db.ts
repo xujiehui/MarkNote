@@ -77,21 +77,84 @@ const DEFAULT_FOLDERS: Folder[] = [
   createFolderDraft({ id: ARCHIVE_FOLDER_ID, name: '归档', sortOrder: 2 }),
 ];
 
-const WELCOME_CONTENT = `<h2>欢迎使用 MarkNote</h2>
-<p>这是一个支持图文混排、代码块、标签、导入导出的跨平台笔记应用。你可以拖拽或粘贴图片，也可以使用工具栏插入代码块。</p>
+const WELCOME_CONTENT = `<h1>👋 欢迎使用 MarkNote</h1>
+<p>这是一个支持图文混排、代码块、标签、导入导出的跨平台笔记应用。你可以拖拽粘贴图片，也可以使用工具栏插入代码块。</p>
+<h3>📌 快速开始</h3>
+<ul>
+<li>在左侧创建或选择笔记本</li>
+<li>在中间列表选择笔记</li>
+<li>在右侧开始编辑你的内容</li>
+<li>所有内容会自动保存到云端</li>
+</ul>
+<h3>💻 代码示例</h3>
 <pre><code class="language-javascript">const note = 'Write once, keep everywhere';
-console.log(note);</code></pre>`;
+console.log(note);
+export default note;</code></pre>
+<h3>✨ 更多功能</h3>
+<ul data-type="taskList">
+<li data-checked="true"><p>支持 Markdown 语法</p></li>
+<li data-checked="true"><p>支持代码高亮</p></li>
+<li data-checked="false"><p>支持导入导出</p></li>
+<li data-checked="false"><p>支持多端同步</p></li>
+</ul>`;
 
 const WELCOME_NOTE_ID = 'marknote-welcome-note';
+const SAMPLE_NOTES: Array<Partial<Note> & { id: string }> = [
+  {
+    id: 'marknote-code-snippets-note',
+    title: '如何使用代码片段功能',
+    content: '<p>在 MarkNote 中，代码片段功能可以帮助你更好地管理和复用代码。</p>',
+    folderId: CODE_FOLDER_ID,
+    tags: ['代码'],
+    pinned: false,
+  },
+  {
+    id: 'marknote-design-review-note',
+    title: '项目复盘：MarkNote 设计',
+    content: '<p>本次迭代优化了整体 UI/UX，提升了编辑体验和交互效率。</p>',
+    folderId: DEFAULT_FOLDER_ID,
+    tags: ['工作'],
+    pinned: false,
+  },
+  {
+    id: 'marknote-deep-work-note',
+    title: '读书笔记：《深度工作》',
+    content: '<p>深度工作是一种专注的工作方式，能够帮助我们更高效地完成任务。</p>',
+    folderId: DEFAULT_FOLDER_ID,
+    tags: ['学习'],
+    pinned: false,
+  },
+  {
+    id: 'marknote-future-ideas-note',
+    title: '灵感记录：关于未来的想法',
+    content: '<p>一些关于产品方向和生活的灵感记录，随时更新。</p>',
+    folderId: DEFAULT_FOLDER_ID,
+    tags: ['灵感'],
+    pinned: false,
+  },
+  {
+    id: 'marknote-markdown-cheatsheet-note',
+    title: 'Markdown 语法备忘',
+    content: '<p>常用的 Markdown 语法速查表。</p>',
+    folderId: DEFAULT_FOLDER_ID,
+    tags: ['学习'],
+    pinned: false,
+  },
+];
 
 export async function ensureSeedNote(): Promise<string> {
   await ensureDefaultFolders();
 
   const welcome = await db.notes.get(WELCOME_NOTE_ID);
   if (welcome) {
-    if (!welcome.folderId) {
-      await db.notes.update(welcome.id, { folderId: DEFAULT_FOLDER_ID });
-    }
+    await db.notes.update(welcome.id, {
+      folderId: welcome.folderId || DEFAULT_FOLDER_ID,
+      content: WELCOME_CONTENT,
+      rawContent: stripHtml(WELCOME_CONTENT),
+      tags: ['资料库', '个人'],
+      pinned: true,
+    });
+    await ensureSampleNotes();
     return welcome.id;
   }
 
@@ -111,11 +174,29 @@ export async function ensureSeedNote(): Promise<string> {
     title: '欢迎使用 MarkNote',
     content: WELCOME_CONTENT,
     folderId: DEFAULT_FOLDER_ID,
-    tags: ['个人', '代码'],
+    tags: ['资料库', '个人'],
     pinned: true,
   });
   await db.notes.put(note);
+  await ensureSampleNotes();
   return note.id;
+}
+
+async function ensureSampleNotes(): Promise<void> {
+  const now = Date.now();
+  for (const [index, sample] of SAMPLE_NOTES.entries()) {
+    const existing = await db.notes.get(sample.id);
+    if (existing) {
+      continue;
+    }
+    await db.notes.put(
+      createNoteDraft({
+        ...sample,
+        createdAt: now - (index + 2) * 24 * 60 * 60 * 1000,
+        updatedAt: now - (index + 2) * 24 * 60 * 60 * 1000,
+      }),
+    );
+  }
 }
 
 export function createNoteDraft(input?: Partial<Note>): Note {

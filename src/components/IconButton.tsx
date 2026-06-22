@@ -13,10 +13,10 @@ export function IconButton({ icon: Icon, label, active, className = '', ...props
       type="button"
       aria-label={label}
       title={label}
-      className={`grid h-8 w-8 place-items-center rounded-md border text-sm transition ${
+      className={`grid h-8 w-[35px] place-items-center rounded-lg text-sm transition ${
         active
-          ? 'border-primary-600 bg-primary-600 text-white'
-          : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50 hover:text-gray-900'
+          ? 'bg-[#eaf2ff] text-[#2f7df6]'
+          : 'text-[#111827] hover:bg-[#f3f4f6]'
       } ${className}`}
       {...props}
     >

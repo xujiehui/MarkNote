@@ -3,7 +3,6 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import type { Folder, Note, ExportFormat, NoteQuickFilter, NoteSortMode, WorkspaceFilter } from './types';
 import {
   ARCHIVE_FOLDER_ID,
-  CODE_FOLDER_ID,
   createFolder,
   createNote,
   db,
@@ -31,7 +30,6 @@ import { ExportMenu } from './components/ExportMenu';
 import { LandingPage } from './LandingPage';
 import { getFolderDisplayName, getTagDisplayName, useI18n } from './i18n';
 import { useSyncSession } from './sync/useSyncSession';
-import { Clock3, Command, Database } from 'lucide-react';
 
 interface ContextState {
   note: Note;
@@ -53,7 +51,7 @@ function NoteWorkspace() {
   const notes = useLiveQuery(() => db.notes.toArray(), [], []);
   const [activeNoteId, setActiveNoteId] = useState<string>('');
   const [query, setQuery] = useState('');
-  const [activeFilter, setActiveFilter] = useState<WorkspaceFilter>(`folder:${DEFAULT_FOLDER_ID}`);
+  const [activeFilter, setActiveFilter] = useState<WorkspaceFilter>('all');
   const [sortMode, setSortMode] = useState<NoteSortMode>('updated');
   const [quickFilter, setQuickFilter] = useState<NoteQuickFilter>('all');
   const [contextMenu, setContextMenu] = useState<ContextState | null>(null);
@@ -455,64 +453,8 @@ function NoteWorkspace() {
   }
 
   return (
-    <div className="grid h-[100dvh] min-w-[1040px] grid-rows-[64px_1fr] overflow-hidden bg-gray-50 text-gray-900">
-      <header className="flex min-w-0 items-center justify-between border-b border-gray-200 bg-white px-5">
-        <button
-          type="button"
-          onClick={() => setActiveFilter('all')}
-          className="flex min-w-0 items-center gap-3 rounded-md text-left outline-none transition focus-visible:ring-2 focus-visible:ring-primary-300"
-          aria-label="MarkNote"
-          title="MarkNote"
-        >
-          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary-600 text-sm font-bold text-white shadow-sm">
-            M
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h1 className="truncate text-base font-semibold leading-tight text-gray-900">MarkNote</h1>
-              <span className="rounded-full bg-primary-50 px-2 py-0.5 text-[11px] font-medium text-primary-700">2.0</span>
-            </div>
-            <p className="truncate text-xs text-gray-500">{t('app.productLabel')}</p>
-          </div>
-        </button>
-
-        <nav className="hidden min-w-0 items-center gap-1 xl:flex" aria-label={t('sidebar.quickAccess')}>
-          <TopNavButton active={activeFilter === 'all'} label={t('filter.allNotes')} onClick={() => setActiveFilter('all')} />
-          <TopNavButton
-            active={activeFilter === `folder:${DEFAULT_FOLDER_ID}`}
-            label={t('folder.library')}
-            onClick={() => setActiveFilter(`folder:${DEFAULT_FOLDER_ID}`)}
-          />
-          <TopNavButton
-            active={activeFilter === `folder:${CODE_FOLDER_ID}`}
-            label={t('folder.codeSnippets')}
-            onClick={() => setActiveFilter(`folder:${CODE_FOLDER_ID}`)}
-          />
-          <TopNavButton
-            active={activeFilter === `folder:${ARCHIVE_FOLDER_ID}`}
-            label={t('folder.archive')}
-            onClick={() => setActiveFilter(`folder:${ARCHIVE_FOLDER_ID}`)}
-          />
-          <TopNavButton active={activeFilter === 'trash'} label={t('filter.trash')} onClick={() => setActiveFilter('trash')} />
-        </nav>
-
-        <div className="flex min-w-0 items-center gap-2 text-xs text-gray-500">
-          <div className="hidden items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1.5 lg:flex">
-            <Command size={14} />
-            <span>{t('app.commandHint')}</span>
-          </div>
-          <div className="hidden items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1.5 md:flex">
-            <Database size={14} className="text-success" />
-            <span>{t('app.syncReady')}</span>
-          </div>
-          <div className="hidden items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1.5 2xl:flex">
-            <Clock3 size={14} className="text-primary-600" />
-            <span>{t('app.performance')}</span>
-          </div>
-        </div>
-      </header>
-
-      <div className="flex min-h-0 overflow-hidden">
+    <div className="h-[100dvh] min-w-[1180px] overflow-hidden bg-white text-[#111827]">
+      <div className="flex h-full min-h-0 overflow-hidden">
         <Sidebar
           query={query}
           folders={folders}
@@ -601,31 +543,15 @@ function NoteWorkspace() {
   );
 }
 
-interface TopNavButtonProps {
-  active: boolean;
-  label: string;
-  onClick: () => void;
-}
-
-function TopNavButton({ active, label, onClick }: TopNavButtonProps) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`h-9 rounded-md px-3 text-sm font-medium transition ${
-        active ? 'bg-primary-50 text-primary-700' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-      }`}
-    >
-      {label}
-    </button>
-  );
-}
-
 function shouldOpenWorkspace() {
   const params = new URLSearchParams(window.location.search);
   return params.get('app') === '1' || window.location.hash === '#app';
 }
 
 export default function App() {
-  return shouldOpenWorkspace() ? <NoteWorkspace /> : <LandingPage />;
+  const openWorkspace = shouldOpenWorkspace();
+  useEffect(() => {
+    document.documentElement.classList.toggle('marknote-shell', openWorkspace);
+  }, [openWorkspace]);
+  return openWorkspace ? <NoteWorkspace /> : <LandingPage />;
 }
