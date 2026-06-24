@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EditorContent, useEditor } from '@tiptap/react';
-import { Mark, mergeAttributes } from '@tiptap/core';
+import { Mark, Node as TiptapNode, mergeAttributes } from '@tiptap/core';
 import { NodeSelection } from '@tiptap/pm/state';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
@@ -12,10 +12,14 @@ import {
   Bold,
   CheckSquare,
   ChevronDown,
+  ChevronsUp,
   Code2,
   Copy,
   Columns2,
+  Download,
   Ellipsis,
+  Eye,
+  File as FileIcon,
   Heading1,
   Heading2,
   Heading3,
@@ -27,7 +31,11 @@ import {
   ListChecks,
   ListOrdered,
   MessageSquareQuote,
+  Minus as MinusIcon,
+  Music as AudioIcon,
+  PanelTop as VideoIcon,
   Quote,
+  RefreshCw,
   Redo2,
   Share2,
   Sigma,
@@ -40,21 +48,37 @@ import {
   Undo2,
   Wand2,
 } from 'lucide-react';
-import type { Note } from '../types';
+import type { Note, SharePermission, ShareSettings, ShareType } from '../types';
 import { fileToBase64Image } from '../lib/image';
-import { formatFullDate } from '../lib/date';
-import { highlightCodeBlocks } from '../editor/codeBlockUtils';
+import { formatFullDate, formatUpdatedAt } from '../lib/date';
+import { CODE_LANGUAGES, codeLanguageLabel, highlightCodeBlocks } from '../editor/codeBlockUtils';
 import { ResizableImage } from '../editor/ResizableImage';
-import { useI18n } from '../i18n';
+import { getTagDisplayName, useI18n } from '../i18n';
 import { IconButton } from './IconButton';
+import { tagPillStyle } from '../lib/tags';
 
 interface EditorPaneProps {
   note?: Note;
   saveState: 'idle' | 'saving' | 'saved';
+  snapshots: NoteSnapshot[];
+  shareSettings?: ShareSettings;
+  tags: string[];
+  tagColors: Record<string, string>;
   onTitleChange: (title: string) => void;
   onContentChange: (content: string) => void;
   onManualSave: () => void;
   onToggleTag: (tag: string) => void;
+  onTogglePin: () => void;
+  onDeleteNote: () => void;
+  onRestoreSnapshot: (snapshot: NoteSnapshot) => void;
+  onShareSettingsChange: (changes: Partial<Pick<ShareSettings, 'type' | 'permission'>>) => void;
+}
+
+export interface NoteSnapshot {
+  id: string;
+  title: string;
+  content: string;
+  createdAt: number;
 }
 
 interface ImageBubble {
@@ -77,25 +101,50 @@ interface CodeCopyOverlay {
   text: string;
   x: number;
   y: number;
+  language: string;
+  collapsed: boolean;
 }
 
 export function EditorPane({
   note,
   saveState,
+  snapshots,
+  shareSettings,
+  tags,
+  tagColors,
   onTitleChange,
   onContentChange,
+  onManualSave,
+  onToggleTag,
+  onTogglePin,
+  onDeleteNote,
+  onRestoreSnapshot,
+  onShareSettingsChange,
 }: EditorPaneProps) {
-  const { locale, t } = useI18n();
+  const { language, locale, setLanguage, t } = useI18n();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const replaceImageInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
+  const audioInputRef = useRef<HTMLInputElement>(null);
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
   const editorShellRef = useRef<HTMLDivElement>(null);
+  const hoveredCodeBlockRef = useRef<HTMLPreElement | null>(null);
   const codeLanguage = 'javascript';
   const [imageBubble, setImageBubble] = useState<ImageBubble | null>(null);
   const [imageMenu, setImageMenu] = useState<ImageMenu | null>(null);
+  const [imagePreviewSrc, setImagePreviewSrc] = useState('');
+  const [imageUploadProgress, setImageUploadProgress] = useState<number | null>(null);
   const [codeCopyOverlay, setCodeCopyOverlay] = useState<CodeCopyOverlay | null>(null);
+  const [collapsedCodeBlocks, setCollapsedCodeBlocks] = useState<Record<string, boolean>>({});
   const [isImageDragOver, setIsImageDragOver] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [slashOpen, setSlashOpen] = useState(false);
+  const [slashQuery, setSlashQuery] = useState('');
+  const [wideLayout, setWideLayout] = useState(false);
+  const [focusMode, setFocusMode] = useState(false);
   const [toast, setToast] = useState('');
 
   const extensions = useMemo(
@@ -111,6 +160,9 @@ export function EditorPane({
         placeholder: t('editor.placeholder'),
       }),
       UnderlineMark,
+      VideoNode,
+      AudioNode,
+      FileAttachmentNode,
       ResizableImage.configure({
         allowBase64: true,
         inline: false,
@@ -147,10 +199,13 @@ export function EditorPane({
         return;
       }
 
-      for (const file of files) {
+      setImageUploadProgress(5);
+      for (const [index, file] of files.entries()) {
         const src = await fileToBase64Image(file);
         editor.chain().focus().setImage({ src, alt: file.name, width: '50%', align: 'left' } as never).run();
+        setImageUploadProgress(Math.round(((index + 1) / files.length) * 100));
       }
+      window.setTimeout(() => setImageUploadProgress(null), 650);
     },
     [editor, note],
   );
@@ -293,20 +348,37 @@ export function EditorPane({
     const pre = target.closest('pre') as HTMLPreElement | null;
     if (!pre || !editorShellRef.current?.contains(pre)) {
       setCodeCopyOverlay(null);
+      hoveredCodeBlockRef.current = null;
       return;
     }
 
     const rect = pre.getBoundingClientRect();
-    const text = pre.querySelector('code')?.textContent || pre.textContent || '';
+    const code = pre.querySelector('code');
+    const text = code?.textContent || pre.textContent || '';
+    const language =
+      Array.from(code?.classList || [])
+        .find((className) => className.startsWith('language-'))
+        ?.replace('language-', '') || 'javascript';
+    const blockId = codeBlockId(pre);
+    hoveredCodeBlockRef.current = pre;
     const next = {
       text,
-      x: Math.max(16, Math.min(rect.right - 82, window.innerWidth - 96)),
+      x: Math.max(16, Math.min(rect.right - 236, window.innerWidth - 252)),
       y: Math.max(84, rect.top + 8),
+      language,
+      collapsed: Boolean(collapsedCodeBlocks[blockId]),
     };
     setCodeCopyOverlay((current) =>
-      current && current.text === next.text && current.x === next.x && current.y === next.y ? current : next,
+      current &&
+      current.text === next.text &&
+      current.x === next.x &&
+      current.y === next.y &&
+      current.language === next.language &&
+      current.collapsed === next.collapsed
+        ? current
+        : next,
     );
-  }, []);
+  }, [collapsedCodeBlocks]);
 
   if (!note) {
     return (
@@ -319,8 +391,6 @@ export function EditorPane({
     );
   }
 
-  const isReferenceWelcomeNote = note.id === 'marknote-welcome-note' || note.title === '欢迎使用 MarkNote';
-
   function insertCodeBlock() {
     editor?.chain().focus().toggleCodeBlock({ language: codeLanguage }).run();
   }
@@ -329,14 +399,38 @@ export function EditorPane({
     editor?.chain().focus().insertContent(content).run();
   }
 
+  async function insertMediaFile(file: File, kind: 'video' | 'audio' | 'file') {
+    if (!editor) {
+      return;
+    }
+    const dataUrl = await readFileAsDataUrl(file);
+    const safeName = escapeHtml(file.name);
+    if (kind === 'video') {
+      editor.chain().focus().insertContent(`<video controls src="${dataUrl}" title="${safeName}"></video><p></p>`).run();
+      showToast('视频已插入');
+      return;
+    }
+    if (kind === 'audio') {
+      editor.chain().focus().insertContent(`<audio controls src="${dataUrl}" title="${safeName}"></audio><p></p>`).run();
+      showToast('音频已插入');
+      return;
+    }
+    editor.chain().focus().insertContent(`<file-attachment href="${dataUrl}" filename="${safeName}"></file-attachment>`).run();
+    showToast('文件已插入');
+  }
+
+  function showToast(message: string, duration = 1400) {
+    setToast(message);
+    window.setTimeout(() => setToast(''), duration);
+  }
+
   function toggleUnderline() {
     editor?.chain().focus().toggleMark('underline').run();
   }
 
   async function copyCodeText(text: string) {
     await navigator.clipboard.writeText(text);
-    setToast(t('editor.codeCopied'));
-    window.setTimeout(() => setToast(''), 1200);
+    showToast(t('editor.codeCopied'));
   }
 
   async function copySelectedImage() {
@@ -347,8 +441,102 @@ export function EditorPane({
     const response = await fetch(src);
     const blob = await response.blob();
     await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
-    setToast(t('editor.imageCopied'));
-    window.setTimeout(() => setToast(''), 1200);
+    showToast(t('editor.imageCopied'));
+  }
+
+  async function downloadSelectedImage() {
+    const src = (editor?.getAttributes('image') as { src?: string })?.src;
+    if (!src) {
+      return;
+    }
+    const link = document.createElement('a');
+    link.href = src;
+    link.download = `${note?.title || 'marknote-image'}.png`;
+    link.click();
+    showToast('图片已下载');
+  }
+
+  async function replaceSelectedImage(file: File) {
+    if (!editor || !file.type.startsWith('image/')) {
+      return;
+    }
+    setImageUploadProgress(10);
+    const src = await fileToBase64Image(file);
+    editor.chain().focus().updateAttributes('image', { src, alt: file.name }).run();
+    setImageUploadProgress(100);
+    setImageBubble(null);
+    setImageMenu(null);
+    window.setTimeout(() => setImageUploadProgress(null), 650);
+    showToast('图片已替换');
+  }
+
+  function previewSelectedImage() {
+    const src = (editor?.getAttributes('image') as { src?: string })?.src;
+    if (src) {
+      setImagePreviewSrc(src);
+    }
+  }
+
+  function toggleHoveredCodeBlock() {
+    const pre = hoveredCodeBlockRef.current;
+    if (!pre) {
+      return;
+    }
+    const id = codeBlockId(pre);
+    setCollapsedCodeBlocks((current) => {
+      const collapsed = !current[id];
+      pre.classList.toggle('is-collapsed', collapsed);
+      return { ...current, [id]: collapsed };
+    });
+    setCodeCopyOverlay((current) => (current ? { ...current, collapsed: !current.collapsed } : current));
+  }
+
+  function setHoveredCodeLanguage(language: string) {
+    const pre = hoveredCodeBlockRef.current;
+    if (!pre || !editor) {
+      return;
+    }
+    const position = editor.view.posAtDOM(pre, 0);
+    const selection = NodeSelection.create(editor.state.doc, position);
+    editor.view.dispatch(editor.state.tr.setSelection(selection));
+    editor.chain().focus().updateAttributes('codeBlock', { language }).run();
+    setCodeCopyOverlay((current) => (current ? { ...current, language } : current));
+    showToast(`代码语言：${codeLanguageLabel(language)}`);
+  }
+
+  function runAiAction(action: string) {
+    if (!editor || !note) {
+      return;
+    }
+
+    const { from, to, empty } = editor.state.selection;
+    const selectedText = empty ? '' : editor.state.doc.textBetween(from, to, '\n').trim();
+    const wholeText = editor.state.doc.textContent.trim();
+    const source = selectedText || wholeText || note.title;
+    const snippets: Record<string, string> = {
+      continue: `<p>${source}。接下来可以继续补充背景、关键结论和下一步行动。</p>`,
+      summarize: `<blockquote><p>总结：${source.slice(0, 96)}${source.length > 96 ? '...' : ''}</p></blockquote>`,
+      polish: `<p>${source.replace(/这是一个/g, '这是一个更加清晰的')}</p>`,
+      translate: `<p>Translation: ${source}</p>`,
+      title: `<h2>${source.split(/[。.!?\n]/)[0].slice(0, 28) || '新的标题'}</h2>`,
+      outline: '<ul><li>背景与目标</li><li>关键内容</li><li>下一步行动</li></ul>',
+      todos: '<ul><li>[ ] 整理重点</li><li>[ ] 确认下一步</li></ul>',
+    };
+
+    editor.chain().focus().insertContent(snippets[action] || '').run();
+    setAiOpen(false);
+    showToast('AI 已生成内容');
+  }
+
+  async function copyShareLink(type: string) {
+    if (!note) {
+      return;
+    }
+    const linkId = shareSettings?.linkId || note.id;
+    const url = `https://marknote.app/share/${linkId}`;
+    await navigator.clipboard.writeText(url);
+    setShareOpen(false);
+    showToast(`${type}链接已复制`);
   }
 
   function deleteSelectedImage() {
@@ -408,9 +596,44 @@ export function EditorPane({
     window.addEventListener('mouseup', onUp);
   }
 
+  const stats = noteStats(editor?.state.doc.textContent || '');
+  const snapshotGroups = groupSnapshots(snapshots);
+  const shareTypes: Array<{ type: ShareType; label: string }> = [
+    { type: 'private', label: t('editor.sharePrivate') },
+    { type: 'public', label: t('editor.sharePublic') },
+    { type: 'team', label: t('editor.shareTeam') },
+  ];
+  const sharePermissions: Array<{ permission: SharePermission; label: string }> = [
+    { permission: 'read', label: t('editor.shareRead') },
+    { permission: 'comment', label: t('editor.shareComment') },
+    { permission: 'edit', label: t('editor.shareEdit') },
+  ];
+  const currentShareSettings = shareSettings || {
+    type: 'private' as const,
+    permission: 'read' as const,
+    linkId: note.id,
+    updatedAt: note.updatedAt,
+  };
+  const slashCommands: Array<{ label: string; content: string | null; inputRef: React.RefObject<HTMLInputElement> | null }> = [
+    { label: 'Text', content: '<p>Text</p>', inputRef: null },
+    { label: 'Heading', content: '<h2>Heading</h2>', inputRef: null },
+    { label: 'Todo', content: '<ul><li>[ ] Todo</li></ul>', inputRef: null },
+    { label: 'Image', content: null, inputRef: fileInputRef },
+    { label: 'Video', content: null, inputRef: videoInputRef },
+    { label: 'Audio', content: null, inputRef: audioInputRef },
+    { label: 'File', content: null, inputRef: attachmentInputRef },
+    { label: 'Table', content: '<p>| Key | Value |</p><p>| --- | --- |</p>', inputRef: null },
+    { label: 'Code', content: '<pre><code class="language-javascript">console.log()</code></pre>', inputRef: null },
+    { label: 'Quote', content: '<blockquote><p>Quote</p></blockquote>', inputRef: null },
+    { label: 'Callout', content: '<blockquote><p>Callout</p></blockquote>', inputRef: null },
+    { label: 'Divider', content: '<hr><p></p>', inputRef: null },
+    { label: 'Mermaid', content: '<pre><code class="language-mermaid">graph TD\\nA-->B</code></pre>', inputRef: null },
+    { label: 'Math', content: '<p>$$ E = mc^2 $$</p>', inputRef: null },
+  ];
+
   return (
-    <main className="grid min-w-0 flex-1 grid-rows-[auto_1fr_48px] bg-white">
-      <header className="bg-white px-8 pb-2 pt-5">
+    <main className={`grid min-w-0 flex-1 grid-rows-[auto_1fr_48px] bg-white ${focusMode ? 'marknote-focus-mode' : ''}`}>
+      <header className={`bg-white px-8 pb-2 pt-5 ${focusMode ? 'hidden' : ''}`}>
         <div className="flex items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3">
             <input
@@ -451,23 +674,55 @@ export function EditorPane({
                 <History size={19} />
               </button>
               {historyOpen ? (
-                <div className="absolute right-0 top-11 z-40 w-64 rounded-xl border border-[#e5e7eb] bg-white p-3 text-sm shadow-[0_18px_45px_rgba(15,23,42,0.16)]">
-                  <div className="mb-2 text-xs font-semibold uppercase text-[#6b7280]">{t('editor.versionToday')}</div>
-                  <div className="rounded-lg bg-[#f8fafc] p-2">
-                    <div className="text-xs font-medium text-[#111827]">{formatFullDate(note.updatedAt, locale)}</div>
-                    <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
-                      {[t('editor.versionCompare'), t('editor.versionRestore'), t('editor.versionCopy')].map((item) => (
-                        <button key={item} type="button" className="h-7 rounded border border-[#e5e7eb] bg-white text-[#4b5563] hover:bg-[#f3f4f6]">
-                          {item}
-                        </button>
-                      ))}
-                    </div>
+                <div className="absolute right-0 top-11 z-40 max-h-[520px] w-80 overflow-y-auto rounded-xl border border-[#e5e7eb] bg-white p-3 text-sm shadow-[0_18px_45px_rgba(15,23,42,0.16)]">
+                  <div className="mb-2 flex items-center justify-between">
+                    <div className="text-xs font-semibold uppercase text-[#6b7280]">历史版本</div>
+                    <span className="text-xs text-[#9ca3af]">{snapshots.length} 个快照</span>
+                  </div>
+                  <div className="space-y-3">
+                    {snapshots.length === 0 ? (
+                      <div className="rounded-lg bg-[#f8fafc] p-3 text-xs text-[#6b7280]">暂无历史快照</div>
+                    ) : (
+                      snapshotGroups.map((group) => (
+                        <div key={group.label}>
+                          <div className="mb-1.5 text-xs font-semibold text-[#6b7280]">{group.label}</div>
+                          <div className="space-y-2">
+                            {group.snapshots.map((snapshot) => (
+                              <div key={snapshot.id} className="rounded-lg bg-[#f8fafc] p-2">
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="min-w-0 text-xs font-medium text-[#111827]">{formatFullDate(snapshot.createdAt, locale)}</div>
+                                  <span className="text-[11px] text-[#9ca3af]">{stripText(snapshot.content).length} 字</span>
+                                </div>
+                                <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
+                                  <button type="button" onClick={() => showToast(`与当前版本相差 ${Math.abs(stripText(editor?.getHTML() || '').length - stripText(snapshot.content).length)} 字`)} className="h-7 rounded border border-[#e5e7eb] bg-white text-[#4b5563] hover:bg-[#f3f4f6]">
+                                    {t('editor.versionCompare')}
+                                  </button>
+                                  <button type="button" onClick={() => onRestoreSnapshot(snapshot)} className="h-7 rounded border border-[#e5e7eb] bg-white text-[#4b5563] hover:bg-[#f3f4f6]">
+                                    {t('editor.versionRestore')}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      void navigator.clipboard.writeText(snapshot.content);
+                                      showToast('版本内容已复制');
+                                    }}
+                                    className="h-7 rounded border border-[#e5e7eb] bg-white text-[#4b5563] hover:bg-[#f3f4f6]"
+                                  >
+                                    {t('editor.versionCopy')}
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
               ) : null}
             </div>
-            <TopIconButton label="收藏">
-              <Star size={19} />
+            <TopIconButton label="收藏" active={note.pinned} onClick={onTogglePin}>
+              <Star size={19} className={note.pinned ? 'fill-[#2f7df6] text-[#2f7df6]' : ''} />
             </TopIconButton>
             <div className="relative">
               <button
@@ -484,20 +739,74 @@ export function EditorPane({
                 <Share2 size={19} />
               </button>
               {shareOpen ? (
-                <div className="absolute right-0 top-11 z-40 w-56 rounded-xl border border-[#e5e7eb] bg-white p-2 text-sm shadow-[0_18px_45px_rgba(15,23,42,0.16)]">
-                  {[t('editor.sharePrivate'), t('editor.sharePublic'), t('editor.shareTeam')].map((item) => (
-                    <button key={item} type="button" className="flex h-9 w-full items-center rounded-lg px-2 text-left text-[#4b5563] hover:bg-[#f3f4f6]">
-                      {item}
-                    </button>
-                  ))}
+                <div className="absolute right-0 top-11 z-40 w-72 rounded-xl border border-[#e5e7eb] bg-white p-3 text-sm shadow-[0_18px_45px_rgba(15,23,42,0.16)]">
+                  <div className="mb-3 text-xs font-semibold uppercase text-[#6b7280]">{t('editor.shareType')}</div>
+                  <div className="grid grid-cols-3 gap-1">
+                    {shareTypes.map((item) => (
+                      <button
+                        key={item.type}
+                        type="button"
+                        onClick={() => onShareSettingsChange({ type: item.type })}
+                        className={`h-8 rounded-md text-xs ${currentShareSettings.type === item.type ? 'bg-[#eaf2ff] font-semibold text-[#2563eb]' : 'text-[#4b5563] hover:bg-[#f3f4f6]'}`}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mb-2 mt-4 text-xs font-semibold uppercase text-[#6b7280]">{t('editor.sharePermission')}</div>
+                  <div className="grid grid-cols-3 gap-1">
+                    {sharePermissions.map((item) => (
+                      <button
+                        key={item.permission}
+                        type="button"
+                        onClick={() => onShareSettingsChange({ permission: item.permission })}
+                        className={`h-8 rounded-md text-xs ${currentShareSettings.permission === item.permission ? 'bg-[#eaf2ff] font-semibold text-[#2563eb]' : 'text-[#4b5563] hover:bg-[#f3f4f6]'}`}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mt-4 rounded-lg bg-[#f8fafc] p-2 text-xs text-[#6b7280]">
+                    <div className="truncate text-[#374151]">marknote.app/share/{currentShareSettings.linkId}</div>
+                    <div className="mt-1">{t('editor.shareCurrent')}：{shareTypes.find((item) => item.type === currentShareSettings.type)?.label} · {sharePermissions.find((item) => item.permission === currentShareSettings.permission)?.label}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void copyShareLink(shareTypes.find((item) => item.type === currentShareSettings.type)?.label || '分享')}
+                    className="mt-3 h-9 w-full rounded-lg bg-[#2563eb] text-sm font-semibold text-white hover:bg-[#1d4ed8] active:scale-[0.98]"
+                  >
+                    {t('editor.shareCopyLink')}
+                  </button>
                 </div>
               ) : null}
             </div>
-            <TopIconButton label="更多">
-              <Ellipsis size={20} />
-            </TopIconButton>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  setMoreOpen((value) => !value);
+                  setShareOpen(false);
+                  setHistoryOpen(false);
+                  setAiOpen(false);
+                }}
+                className="grid h-9 w-9 place-items-center rounded-lg text-[#111827] hover:bg-[#f3f4f6]"
+                title="更多"
+                aria-label="更多"
+              >
+                <Ellipsis size={20} />
+              </button>
+              {moreOpen ? (
+                <div className="absolute right-0 top-11 z-40 w-44 overflow-hidden rounded-xl border border-[#e5e7eb] bg-white py-1 text-sm shadow-[0_18px_45px_rgba(15,23,42,0.16)]">
+                  <MenuAction label={t('editor.save')} onClick={onManualSave} />
+                  <MenuAction label="复制标题" onClick={() => void navigator.clipboard.writeText(note.title)} />
+                  <MenuAction label="删除笔记" danger onClick={onDeleteNote} />
+                </div>
+              ) : null}
+            </div>
             <div className="h-8 w-px bg-[#e5e7eb]" />
-            <TopIconButton label="布局">
+            <TopIconButton label="布局" active={wideLayout} onClick={() => {
+              setWideLayout((value) => !value);
+            }}>
               <Columns2 size={19} />
             </TopIconButton>
             <div className="relative">
@@ -508,7 +817,9 @@ export function EditorPane({
                   setShareOpen(false);
                   setHistoryOpen(false);
                 }}
-                className="hidden h-9 items-center gap-1.5 rounded-lg bg-[#2f7df6] px-3 text-xs font-semibold text-white transition hover:bg-[#256ce0] active:scale-[0.98]"
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#2f7df6] px-3 text-xs font-semibold text-white transition hover:bg-[#256ce0] active:scale-[0.98]"
+                aria-label={t('editor.ai')}
+                title={t('editor.ai')}
               >
                 <Sparkles size={15} />
                 {t('editor.ai')}
@@ -517,22 +828,18 @@ export function EditorPane({
               {aiOpen ? (
                 <div className="absolute right-0 top-11 z-40 w-56 rounded-xl border border-[#e5e7eb] bg-white p-2 text-sm shadow-[0_18px_45px_rgba(15,23,42,0.16)]">
                   {[
-                    [t('editor.aiContinue'), Wand2],
-                    [t('editor.aiSummarize'), Bot],
-                    [t('editor.aiPolish'), Sparkles],
-                    [t('editor.aiTranslate'), MessageSquareQuote],
-                    [t('editor.aiTitle'), Heading1],
-                    [t('editor.aiOutline'), ListChecks],
-                    [t('editor.aiTodos'), CheckSquare],
-                  ].map(([label, Icon]) => (
+                    ['continue', t('editor.aiContinue'), Wand2],
+                    ['summarize', t('editor.aiSummarize'), Bot],
+                    ['polish', t('editor.aiPolish'), Sparkles],
+                    ['translate', t('editor.aiTranslate'), MessageSquareQuote],
+                    ['title', t('editor.aiTitle'), Heading1],
+                    ['outline', t('editor.aiOutline'), ListChecks],
+                    ['todos', t('editor.aiTodos'), CheckSquare],
+                  ].map(([action, label, Icon]) => (
                     <button
                       key={String(label)}
                       type="button"
-                      onClick={() => {
-                        setToast(String(label));
-                        setAiOpen(false);
-                        window.setTimeout(() => setToast(''), 1200);
-                      }}
+                      onClick={() => runAiAction(String(action))}
                       className="flex h-9 w-full items-center gap-2 rounded-lg px-2 text-left text-[#4b5563] hover:bg-[#eaf2ff] hover:text-[#2f7df6]"
                     >
                       <Icon size={15} />
@@ -543,6 +850,23 @@ export function EditorPane({
               ) : null}
             </div>
           </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {tags.slice(0, 10).map((tag) => {
+            const active = note.tags.includes(tag);
+            return (
+              <button
+                key={tag}
+                type="button"
+                onClick={() => onToggleTag(tag)}
+                style={active ? tagPillStyle(tag, tagColors, 'solid') : tagPillStyle(tag, tagColors)}
+                className="h-7 rounded-lg border px-3 text-[13px] font-medium transition hover:-translate-y-0.5"
+              >
+                {active ? getTagDisplayName(tag, t) : `+ ${getTagDisplayName(tag, t)}`}
+              </button>
+            );
+          })}
         </div>
 
         <div className="mt-4 inline-flex max-w-full items-center overflow-hidden rounded-lg border border-[#e5e7eb] bg-white px-2 py-2 shadow-[0_10px_30px_rgba(15,23,42,0.08)]">
@@ -561,26 +885,73 @@ export function EditorPane({
           <ToolbarGroup label={t('editor.contentBlocks')}>
             <IconButton icon={List} label={t('editor.bulletList')} onClick={() => editor?.chain().focus().toggleBulletList().run()} />
             <IconButton icon={ListOrdered} label={t('editor.orderedList')} active={editor?.isActive('orderedList')} onClick={() => editor?.chain().focus().toggleOrderedList().run()} />
+            <IconButton icon={CheckSquare} label={t('editor.checklist')} onClick={() => insertParagraphBlock('<ul><li>[ ] Todo</li></ul>')} />
             <IconButton icon={Quote} label={t('editor.quote')} active={editor?.isActive('blockquote')} onClick={() => editor?.chain().focus().toggleBlockquote().run()} />
+            <IconButton icon={MinusIcon} label={t('editor.divider')} onClick={() => insertParagraphBlock('<hr><p></p>')} />
             <IconButton icon={Link} label="链接" onClick={() => insertParagraphBlock('<p><a href="#">链接</a></p>')} />
           </ToolbarGroup>
           <ToolbarGroup label={t('editor.mediaBlocks')}>
             <IconButton icon={ImagePlus} label={t('editor.insertImage')} onClick={() => fileInputRef.current?.click()} />
-            <IconButton icon={Table2} label={t('editor.table')} onClick={() => insertParagraphBlock('<table><tbody><tr><td>Key</td><td>Value</td></tr></tbody></table><p></p>')} />
+            <IconButton icon={VideoIcon} label={t('editor.video')} onClick={() => videoInputRef.current?.click()} />
+            <IconButton icon={AudioIcon} label={t('editor.audio')} onClick={() => audioInputRef.current?.click()} />
+            <IconButton icon={FileIcon} label={t('editor.file')} onClick={() => attachmentInputRef.current?.click()} />
+            <IconButton icon={Table2} label={t('editor.table')} onClick={() => insertParagraphBlock('<p>| Key | Value |</p><p>| --- | --- |</p>')} />
           </ToolbarGroup>
           <ToolbarGroup label={t('editor.dataBlocks')}>
             <IconButton icon={Sigma} label={t('editor.math')} onClick={() => insertParagraphBlock('<p>$$ E = mc^2 $$</p>')} />
             <IconButton icon={Code2} label={t('editor.mermaid')} onClick={() => insertParagraphBlock('<pre><code class="language-mermaid">graph TD\\nA-->B</code></pre>')} />
           </ToolbarGroup>
-          <button type="button" className="ml-1 grid h-8 w-8 place-items-center rounded-lg text-[#111827] hover:bg-[#f3f4f6]" title={t('editor.slashHint')}>
-            /
-          </button>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setSlashOpen((value) => !value);
+                setSlashQuery('');
+              }}
+              className="ml-1 grid h-8 w-8 place-items-center rounded-lg text-[#111827] hover:bg-[#f3f4f6]"
+              title={t('editor.slashHint')}
+              aria-label={t('editor.slashHint')}
+            >
+              /
+            </button>
+            {slashOpen ? (
+              <div className="absolute left-0 top-10 z-40 w-56 overflow-hidden rounded-xl border border-[#e5e7eb] bg-white p-2 text-sm shadow-[0_18px_45px_rgba(15,23,42,0.16)]">
+                <input
+                  value={slashQuery}
+                  onChange={(event) => setSlashQuery(event.target.value)}
+                  className="mb-1 h-8 w-full rounded-lg border border-[#e5e7eb] px-2 text-xs text-[#111827] outline-none focus:border-[#3b82f6]"
+                  placeholder="搜索命令"
+                  autoFocus
+                />
+                {slashCommands
+                  .filter((command) => fuzzyMatch(command.label, slashQuery))
+                  .map((command) => (
+                    <button
+                      key={command.label}
+                      type="button"
+                      onClick={() => {
+                        if (command.content) {
+                          insertParagraphBlock(command.content);
+                        } else {
+                          command.inputRef?.current?.click();
+                        }
+                        setSlashOpen(false);
+                        setSlashQuery('');
+                      }}
+                      className="flex h-9 w-full items-center rounded-lg px-3 text-left text-[#374151] hover:bg-[#f3f4f6]"
+                    >
+                      {command.label}
+                    </button>
+                  ))}
+              </div>
+            ) : null}
+          </div>
         </div>
       </header>
 
       <section
         ref={editorShellRef}
-        className={`relative min-h-0 overflow-y-auto bg-white pb-10 pl-14 pr-10 pt-7 transition ${
+        className={`relative min-h-0 overflow-y-auto bg-white pb-10 pl-14 pr-10 pt-7 transition ${wideLayout ? 'marknote-wide-editor' : ''} ${
           isImageDragOver ? 'ring-2 ring-inset ring-primary-300' : ''
         }`}
         onMouseMove={updateCodeCopyOverlay}
@@ -623,24 +994,57 @@ export function EditorPane({
           }
         }}
       >
-        {isReferenceWelcomeNote ? <ReferenceWelcomeContent onCopyCode={() => void copyCodeText("const note = 'Write once, keep everywhere';\nconsole.log(note);\nexport default note;")} /> : <EditorContent editor={editor} />}
+        {imageUploadProgress !== null ? (
+          <div className="fixed left-1/2 top-24 z-40 w-64 -translate-x-1/2 overflow-hidden rounded-lg border border-[#bfdbfe] bg-white p-2 text-xs text-[#2563eb] shadow-[0_18px_45px_rgba(15,23,42,0.16)]">
+            <div className="mb-1 flex items-center justify-between">
+              <span>图片上传中</span>
+              <span>{imageUploadProgress}%</span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-[#dbeafe]">
+              <div className="h-full rounded-full bg-[#2563eb] transition-all" style={{ width: `${imageUploadProgress}%` }} />
+            </div>
+          </div>
+        ) : null}
+        <EditorContent editor={editor} />
         {toast ? <div className="fixed bottom-5 right-5 rounded-lg bg-gray-900 px-3 py-2 text-sm text-white shadow-subtle">{toast}</div> : null}
         {codeCopyOverlay ? (
-          <button
-            type="button"
+          <div
             data-code-copy-overlay="true"
-            aria-label={t('editor.copyCode')}
-            title={t('editor.copyCode')}
-            onClick={(event) => {
-              event.stopPropagation();
-              void copyCodeText(codeCopyOverlay.text);
-            }}
-            className="fixed z-30 inline-flex h-7 items-center gap-1 rounded-md border border-white/15 bg-white/10 px-2 text-xs text-white shadow-subtle backdrop-blur transition hover:bg-white/20"
+            className="fixed z-30 inline-flex h-8 items-center gap-1 rounded-md border border-white/15 bg-white/10 px-1.5 text-xs text-white shadow-subtle backdrop-blur"
             style={{ left: codeCopyOverlay.x, top: codeCopyOverlay.y }}
+            onClick={(event) => event.stopPropagation()}
           >
-            <Copy size={13} />
-            {t('editor.copyCode')}
-          </button>
+            <select
+              value={codeCopyOverlay.language}
+              onChange={(event) => setHoveredCodeLanguage(event.target.value)}
+              className="h-6 max-w-[104px] rounded border border-white/15 bg-[#111827] px-1 text-[11px] text-white outline-none"
+              aria-label="代码语言"
+            >
+              {CODE_LANGUAGES.map((language) => (
+                <option key={language} value={language}>
+                  {codeLanguageLabel(language)}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              aria-label={t('editor.copyCode')}
+              title={t('editor.copyCode')}
+              onClick={() => void copyCodeText(codeCopyOverlay.text)}
+              className="grid h-6 w-6 place-items-center rounded hover:bg-white/20"
+            >
+              <Copy size={13} />
+            </button>
+            <button
+              type="button"
+              aria-label={codeCopyOverlay.collapsed ? '展开代码块' : '折叠代码块'}
+              title={codeCopyOverlay.collapsed ? '展开代码块' : '折叠代码块'}
+              onClick={toggleHoveredCodeBlock}
+              className="grid h-6 w-6 place-items-center rounded hover:bg-white/20"
+            >
+              <ChevronsUp size={13} className={codeCopyOverlay.collapsed ? 'rotate-180' : ''} />
+            </button>
+          </div>
         ) : null}
         {imageBubble ? (
           <div
@@ -650,6 +1054,8 @@ export function EditorPane({
             <IconButton icon={AlignLeft} label={t('editor.imageLeft')} onClick={() => setImageAlign('left')} />
             <IconButton icon={AlignCenter} label={t('editor.imageCenter')} onClick={() => setImageAlign('center')} />
             <IconButton icon={AlignRight} label={t('editor.imageRight')} onClick={() => setImageAlign('right')} />
+            <IconButton icon={Eye} label="预览图片" onClick={previewSelectedImage} />
+            <IconButton icon={RefreshCw} label="替换图片" onClick={() => replaceImageInputRef.current?.click()} />
             <button
               type="button"
               onClick={() => setImageWidth('50%')}
@@ -665,6 +1071,7 @@ export function EditorPane({
               100%
             </button>
             <IconButton icon={Copy} label={t('editor.copyImage')} onClick={() => void copySelectedImage()} />
+            <IconButton icon={Download} label="下载图片" onClick={() => void downloadSelectedImage()} />
             <IconButton icon={Trash2} label={t('editor.deleteImage')} onClick={deleteSelectedImage} />
           </div>
         ) : null}
@@ -708,6 +1115,18 @@ export function EditorPane({
                 {t('editor.width100')}
               </button>
             </div>
+            <button type="button" onClick={previewSelectedImage} className="flex h-9 w-full items-center gap-2 px-3 text-left text-gray-700 hover:bg-gray-50">
+              <Eye size={15} />
+              预览
+            </button>
+            <button type="button" onClick={() => replaceImageInputRef.current?.click()} className="flex h-9 w-full items-center gap-2 px-3 text-left text-gray-700 hover:bg-gray-50">
+              <RefreshCw size={15} />
+              替换
+            </button>
+            <button type="button" onClick={() => void downloadSelectedImage()} className="flex h-9 w-full items-center gap-2 px-3 text-left text-gray-700 hover:bg-gray-50">
+              <Download size={15} />
+              下载
+            </button>
             <button type="button" onClick={() => void copySelectedImage()} className="flex h-9 w-full items-center gap-2 px-3 text-left text-gray-700 hover:bg-gray-50">
               <Copy size={15} />
               {t('editor.copyImage')}
@@ -730,18 +1149,84 @@ export function EditorPane({
             }
           }}
         />
+        <input
+          ref={videoInputRef}
+          type="file"
+          accept="video/*"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) {
+              void insertMediaFile(file, 'video');
+              event.target.value = '';
+            }
+          }}
+        />
+        <input
+          ref={audioInputRef}
+          type="file"
+          accept="audio/*"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) {
+              void insertMediaFile(file, 'audio');
+              event.target.value = '';
+            }
+          }}
+        />
+        <input
+          ref={attachmentInputRef}
+          type="file"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) {
+              void insertMediaFile(file, 'file');
+              event.target.value = '';
+            }
+          }}
+        />
+        <input
+          ref={replaceImageInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) {
+              void replaceSelectedImage(file);
+              event.target.value = '';
+            }
+          }}
+        />
+        {imagePreviewSrc ? (
+          <div className="fixed inset-0 z-50 grid place-items-center bg-[#0f172a]/72 p-8" onClick={() => setImagePreviewSrc('')}>
+            <div className="relative max-h-full max-w-full" onClick={(event) => event.stopPropagation()}>
+              <img src={imagePreviewSrc} alt="图片预览" className="max-h-[82vh] max-w-[82vw] rounded-lg bg-white object-contain shadow-[0_28px_80px_rgba(0,0,0,0.4)]" />
+              <button
+                type="button"
+                onClick={() => setImagePreviewSrc('')}
+                className="absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-full bg-white/90 text-[#111827] shadow hover:bg-white"
+                aria-label="关闭预览"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        ) : null}
       </section>
       <footer className="flex items-center justify-between border-t border-[#e5e7eb] px-9 text-[13px] text-[#6b7280]">
         <div className="flex items-center gap-7">
-          <span>字数：152</span>
-          <span>词数：32</span>
-          <span>行数：12</span>
+          <span>字数：{stats.characters}</span>
+          <span>词数：{stats.words}</span>
+          <span>行数：{stats.lines}</span>
         </div>
         <div className="flex items-center gap-7">
-          <span>最后编辑：刚刚</span>
-          <span>?</span>
-          <span>中</span>
-          <span>↗</span>
+          <span>最后编辑：{formatUpdatedAt(note.updatedAt, locale)}</span>
+          <button type="button" onClick={() => showToast('帮助：选中文字后可使用 AI 或工具栏处理')} className="hover:text-[#111827]">?</button>
+          <button type="button" onClick={() => setLanguage(language === 'zh-CN' ? 'en' : 'zh-CN')} className="hover:text-[#111827]">{language === 'zh-CN' ? '中' : 'EN'}</button>
+          <button type="button" onClick={() => setFocusMode((value) => !value)} className="hover:text-[#111827]">{focusMode ? '↙' : '↗'}</button>
         </div>
       </footer>
     </main>
@@ -763,80 +1248,183 @@ function ToolbarGroup({ label, children }: { label: string; children: React.Reac
   );
 }
 
-function TopIconButton({ label, onClick, children }: { label: string; onClick?: () => void; children: React.ReactNode }) {
+function TopIconButton({ label, active, onClick, children }: { label: string; active?: boolean; onClick?: () => void; children: React.ReactNode }) {
   return (
     <button
       type="button"
       onClick={onClick}
       title={label}
       aria-label={label}
-      className="grid h-9 w-9 place-items-center rounded-lg text-[#111827] transition hover:bg-[#f3f4f6]"
+      className={`grid h-9 w-9 place-items-center rounded-lg transition hover:bg-[#f3f4f6] ${
+        active ? 'bg-[#eaf2ff] text-[#2f7df6]' : 'text-[#111827]'
+      }`}
     >
       {children}
     </button>
   );
 }
 
-function ReferenceWelcomeContent({ onCopyCode }: { onCopyCode: () => void }) {
+function MenuAction({ label, danger, onClick }: { label: string; danger?: boolean; onClick: () => void }) {
   return (
-    <article className="reference-welcome-content">
-      <div className="editor-hero mb-6 max-w-[936px]">
-        <div className="mb-4 flex items-center gap-3">
-          <span className="text-[32px] leading-none">👋</span>
-          <h1 className="text-[34px] font-bold leading-tight text-[#111827]">欢迎使用 MarkNote</h1>
-        </div>
-        <div className="mb-4 flex items-center gap-3">
-          <span className="rounded-lg bg-[#dbeafe] px-3 py-1 text-[13px] font-semibold text-[#2f7df6]">资料库</span>
-          <span className="rounded-lg bg-[#dcfce7] px-3 py-1 text-[13px] font-semibold text-[#16a34a]">个人</span>
-          <button type="button" className="h-7 rounded-lg border border-[#e5e7eb] bg-white px-3 text-[13px] text-[#6b7280] hover:bg-[#f8fafc]">
-            + 添加标签
-          </button>
-        </div>
-        <div className="h-px bg-[#e5e7eb]" />
-      </div>
-
-      <p>
-        这是一个支持图文混排、代码块、标签、导入导出的跨平台笔记应用。
-        <br />
-        你可以拖拽粘贴图片，也可以使用工具栏插入代码块。
-      </p>
-
-      <h3>📌 快速开始</h3>
-      <ul className="reference-bullets">
-        <li>在左侧创建或选择笔记本</li>
-        <li>在中间列表选择笔记</li>
-        <li>在右侧开始编辑你的内容</li>
-        <li>所有内容会自动保存到云端</li>
-      </ul>
-
-      <h3>💻 代码示例</h3>
-      <div className="reference-code-block">
-        <div className="reference-code-header">
-          <span>▰ JavaScript</span>
-          <button type="button" onClick={onCopyCode}>
-            ▣ 复制
-          </button>
-        </div>
-        <div className="reference-code-body">
-          <span className="reference-line-numbers">1{'\n'}2{'\n'}3</span>
-          <code>
-            <span className="hljs-keyword">const</span> note = <span className="hljs-string">'Write once, keep everywhere'</span>;{'\n'}
-            console.<span className="hljs-title">log</span>(note);{'\n'}
-            <span className="hljs-keyword">export</span> <span className="hljs-keyword">default</span> note;
-          </code>
-        </div>
-      </div>
-
-      <h3>✨ 更多功能</h3>
-      <ul className="reference-checklist">
-        <li className="checked">支持 Markdown 语法</li>
-        <li className="checked">支持代码高亮</li>
-        <li>支持导入导出</li>
-        <li>支持多端同步</li>
-      </ul>
-    </article>
+    <button type="button" onClick={onClick} className={`flex h-9 w-full items-center px-3 text-left hover:bg-[#f3f4f6] ${danger ? 'text-[#ef4444]' : 'text-[#374151]'}`}>
+      {label}
+    </button>
   );
 }
+
+function noteStats(text: string) {
+  const normalized = text.trim();
+  return {
+    characters: normalized.length,
+    words: normalized ? normalized.split(/\s+/).length : 0,
+    lines: Math.max(1, normalized.split(/\n+/).length),
+  };
+}
+
+function stripText(html: string) {
+  return html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error || new Error('读取文件失败'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (char) => {
+    const entities: Record<string, string> = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    };
+    return entities[char] || char;
+  });
+}
+
+function fuzzyMatch(label: string, query: string) {
+  const needle = query.trim().toLowerCase();
+  if (!needle) {
+    return true;
+  }
+  let cursor = 0;
+  const haystack = label.toLowerCase();
+  for (const char of needle) {
+    cursor = haystack.indexOf(char, cursor);
+    if (cursor === -1) {
+      return false;
+    }
+    cursor += 1;
+  }
+  return true;
+}
+
+function groupSnapshots(snapshots: NoteSnapshot[]) {
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startOfYesterday = startOfToday - 24 * 60 * 60 * 1000;
+  const groups = [
+    { label: '今天', snapshots: [] as NoteSnapshot[] },
+    { label: '昨天', snapshots: [] as NoteSnapshot[] },
+    { label: '7天内', snapshots: [] as NoteSnapshot[] },
+    { label: '30天内', snapshots: [] as NoteSnapshot[] },
+  ];
+
+  for (const snapshot of snapshots) {
+    if (snapshot.createdAt >= startOfToday) {
+      groups[0].snapshots.push(snapshot);
+    } else if (snapshot.createdAt >= startOfYesterday) {
+      groups[1].snapshots.push(snapshot);
+    } else if (snapshot.createdAt >= startOfToday - 7 * 24 * 60 * 60 * 1000) {
+      groups[2].snapshots.push(snapshot);
+    } else {
+      groups[3].snapshots.push(snapshot);
+    }
+  }
+
+  return groups.filter((group) => group.snapshots.length > 0);
+}
+
+function codeBlockId(pre: HTMLPreElement): string {
+  const existing = pre.dataset.codeBlockId;
+  if (existing) {
+    return existing;
+  }
+  const id = `code-${Math.random().toString(36).slice(2)}`;
+  pre.dataset.codeBlockId = id;
+  return id;
+}
+
+const VideoNode = TiptapNode.create({
+  name: 'video',
+  group: 'block',
+  atom: true,
+
+  addAttributes() {
+    return {
+      src: { default: null },
+      title: { default: null },
+      controls: { default: true },
+    };
+  },
+
+  parseHTML() {
+    return [{ tag: 'video' }];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ['video', mergeAttributes(HTMLAttributes, { controls: 'true' })];
+  },
+});
+
+const AudioNode = TiptapNode.create({
+  name: 'audio',
+  group: 'block',
+  atom: true,
+
+  addAttributes() {
+    return {
+      src: { default: null },
+      title: { default: null },
+      controls: { default: true },
+    };
+  },
+
+  parseHTML() {
+    return [{ tag: 'audio' }];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ['audio', mergeAttributes(HTMLAttributes, { controls: 'true' })];
+  },
+});
+
+const FileAttachmentNode = TiptapNode.create({
+  name: 'fileAttachment',
+  group: 'block',
+  atom: true,
+
+  addAttributes() {
+    return {
+      href: { default: null },
+      filename: { default: '下载文件' },
+    };
+  },
+
+  parseHTML() {
+    return [{ tag: 'file-attachment' }, { tag: 'a[download]' }];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    const filename = HTMLAttributes.filename || HTMLAttributes.download || '下载文件';
+    return ['a', mergeAttributes(HTMLAttributes, { download: filename, href: HTMLAttributes.href, class: 'marknote-file-attachment' }), filename];
+  },
+});
 
 const UnderlineMark = Mark.create({
   name: 'underline',

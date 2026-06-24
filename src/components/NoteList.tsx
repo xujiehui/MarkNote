@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { FixedSizeList as VirtualList } from 'react-window';
-import { ListFilter, MoreHorizontal, Pin, Plus, RotateCcw, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { Check, ListFilter, MoreHorizontal, Pin, Plus, RotateCcw, SlidersHorizontal, Trash2 } from 'lucide-react';
 import type { Folder as NoteFolder, Note, NoteQuickFilter, NoteSortMode } from '../types';
 import { formatUpdatedAt } from '../lib/date';
 import { getPreview } from '../lib/html';
@@ -38,6 +39,21 @@ export function NoteList({
   onDeleteForever,
 }: NoteListProps) {
   const { locale, t } = useI18n();
+  const [sortOpen, setSortOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const sortOptions: Array<{ mode: NoteSortMode; label: string }> = [
+    { mode: 'updated', label: t('note.sortUpdated') },
+    { mode: 'created', label: t('note.sortCreated') },
+    { mode: 'title', label: t('note.sortTitle') },
+    { mode: 'favorite', label: '收藏数' },
+  ];
+  const filterOptions: Array<{ mode: NoteQuickFilter; label: string }> = [
+    { mode: 'all', label: '全部' },
+    { mode: 'pinned', label: t('note.filterPinned') },
+    { mode: 'archived', label: t('note.filterArchived') },
+    { mode: 'recent7', label: t('note.filterRecent7') },
+    { mode: 'recent30', label: t('note.filterRecent30') },
+  ];
 
   return (
     <section className="grid h-full w-[360px] shrink-0 grid-rows-[auto_1fr] border-r border-[#e5e7eb] bg-white">
@@ -45,21 +61,65 @@ export function NoteList({
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <h2 className="truncate text-[18px] font-semibold leading-tight text-[#111827]">{title}</h2>
-            <p className="mt-1 text-[14px] text-[#6b7280]">{t('note.records', { count: 24 })}</p>
+            <p className="mt-1 text-[14px] text-[#6b7280]">{t('note.records', { count: notes.length })}</p>
           </div>
           <div className="flex items-center gap-2">
-            <IconMenuButton
-              title={t('note.sort')}
-              onClick={() => onSortModeChange(sortMode === 'updated' ? 'created' : 'updated')}
-            >
-              <ListFilter size={18} />
-            </IconMenuButton>
-            <IconMenuButton
-              title={t('note.filter')}
-              onClick={() => onQuickFilterChange(quickFilter === 'all' ? 'pinned' : 'all')}
-            >
-              <SlidersHorizontal size={18} />
-            </IconMenuButton>
+            <div className="relative">
+              <IconMenuButton
+                title={t('note.sort')}
+                active={sortOpen}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setSortOpen((value) => !value);
+                  setFilterOpen(false);
+                }}
+              >
+                <ListFilter size={18} />
+              </IconMenuButton>
+              {sortOpen ? (
+                <MenuPanel>
+                  {sortOptions.map((option) => (
+                    <MenuOption
+                      key={option.mode}
+                      active={sortMode === option.mode}
+                      label={option.label}
+                      onClick={() => {
+                        onSortModeChange(option.mode);
+                        setSortOpen(false);
+                      }}
+                    />
+                  ))}
+                </MenuPanel>
+              ) : null}
+            </div>
+            <div className="relative">
+              <IconMenuButton
+                title={t('note.filter')}
+                active={filterOpen || quickFilter !== 'all'}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setFilterOpen((value) => !value);
+                  setSortOpen(false);
+                }}
+              >
+                <SlidersHorizontal size={18} />
+              </IconMenuButton>
+              {filterOpen ? (
+                <MenuPanel>
+                  {filterOptions.map((option) => (
+                    <MenuOption
+                      key={option.mode}
+                      active={quickFilter === option.mode}
+                      label={option.label}
+                      onClick={() => {
+                        onQuickFilterChange(option.mode);
+                        setFilterOpen(false);
+                      }}
+                    />
+                  ))}
+                </MenuPanel>
+              ) : null}
+            </div>
             <button
               type="button"
               onClick={onCreateNote}
@@ -97,14 +157,25 @@ export function NoteList({
                     <h3 className="line-clamp-1 text-[16px] font-semibold leading-6 text-[#111827]">{note.title || t('note.untitled')}</h3>
                     <span className="flex shrink-0 items-center gap-4 text-[#4b5563]">
                       {note.pinned ? <Pin size={15} className="fill-[#2f7df6] text-[#2f7df6]" /> : null}
-                      <MoreHorizontal size={17} />
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onContextMenu(event, note);
+                        }}
+                        className="grid h-6 w-6 place-items-center rounded-md hover:bg-[#eef2f7]"
+                        aria-label="笔记操作"
+                        title="笔记操作"
+                      >
+                        <MoreHorizontal size={17} />
+                      </button>
                     </span>
                   </div>
                   <p className="line-clamp-2 min-h-[38px] text-[14px] leading-[1.5] text-[#4b5563]">
-                    {notePreview(note, index, t('note.emptyPreview'))}
-                  </p>
-                  <div className="mt-3 flex items-center justify-between gap-3">
-                    <time className="text-[14px] text-[#4b5563]">{referenceDate(index, formatUpdatedAt(note.updatedAt, locale))}</time>
+                    {notePreview(note, t('note.emptyPreview'))}
+                      </p>
+                      <div className="mt-3 flex items-center justify-between gap-3">
+                    <time className="text-[14px] text-[#4b5563]">{formatUpdatedAt(note.updatedAt, locale)}</time>
                     {isTrash ? (
                       <span className="flex gap-1">
                         <button
@@ -134,7 +205,7 @@ export function NoteList({
                       </span>
                     ) : (
                       <span className="flex min-w-0 items-center gap-2">
-                        {noteTags(note, index).map((tag) => (
+                        {noteTags(note).map((tag) => (
                           <span key={tag} className={`rounded-lg px-2.5 py-1 text-[13px] font-medium ${tagPillClass(tag)}`}>
                             {getTagDisplayName(tag, t)}
                           </span>
@@ -152,37 +223,64 @@ export function NoteList({
   );
 }
 
-function IconMenuButton({ title, onClick, children }: { title: string; onClick: () => void; children: React.ReactNode }) {
+function IconMenuButton({
+  title,
+  active,
+  onClick,
+  children,
+}: {
+  title: string;
+  active?: boolean;
+  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  children: React.ReactNode;
+}) {
   return (
     <button
       type="button"
       title={title}
       aria-label={title}
       onClick={onClick}
-      className="grid h-8 w-8 place-items-center rounded-lg text-[#111827] transition hover:bg-[#f3f4f6]"
+      className={`grid h-8 w-8 place-items-center rounded-lg transition hover:bg-[#f3f4f6] ${
+        active ? 'bg-[#eaf2ff] text-[#2f7df6]' : 'text-[#111827]'
+      }`}
     >
       {children}
     </button>
   );
 }
 
-function notePreview(note: Note, index: number, emptyPreview: string) {
-  const fallback = [
-    '这是一个支持图文混排、代码块、标签、导入导出的跨平台笔记应用...',
-    '在 MarkNote 中，代码片段功能可以帮助你更好地管理和复用代码...',
-    '本次迭代优化了整体 UI/UX，提升了编辑体验和交互效率...',
-    '深度工作是一种专注的工作方式，能够帮助我们更高效地完成任务...',
-    '一些关于产品方向和生活的灵感记录，随时更新...',
-    '常用的 Markdown 语法速查表...',
-  ];
-  return fallback[index % fallback.length] || getPreview(note.content, 54, emptyPreview);
+function MenuPanel({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      className="absolute right-0 top-10 z-40 w-40 overflow-hidden rounded-lg border border-[#e5e7eb] bg-white py-1 text-sm shadow-[0_18px_45px_rgba(15,23,42,0.16)]"
+      onClick={(event) => event.stopPropagation()}
+    >
+      {children}
+    </div>
+  );
 }
 
-function noteTags(note: Note, index: number) {
-  if (note.tags.length > 0) {
-    return note.tags.slice(0, 2);
-  }
-  return [['资料库'], ['代码'], ['工作'], ['学习'], ['灵感'], ['学习']][index % 6];
+function MenuOption({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex h-9 w-full items-center justify-between px-3 text-left transition ${
+        active ? 'bg-[#eaf2ff] text-[#2f7df6]' : 'text-[#374151] hover:bg-[#f3f4f6]'
+      }`}
+    >
+      <span>{label}</span>
+      {active ? <Check size={14} /> : null}
+    </button>
+  );
+}
+
+function notePreview(note: Note, emptyPreview: string) {
+  return getPreview(note.content, 54, emptyPreview);
+}
+
+function noteTags(note: Note) {
+  return note.tags.slice(0, 2);
 }
 
 function tagPillClass(tag: string) {
@@ -202,9 +300,4 @@ function tagPillClass(tag: string) {
     return 'bg-[#fce7f3] text-[#ec4899]';
   }
   return 'bg-[#dbeafe] text-[#2f7df6]';
-}
-
-function referenceDate(index: number, fallback: string) {
-  const values = ['06/17 17:17', '06/16 10:24', '06/15 15:30', '06/14 09:12', '06/13 22:45', '06/12 11:08'];
-  return values[index] || fallback;
 }

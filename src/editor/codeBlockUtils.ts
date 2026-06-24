@@ -16,11 +16,39 @@ export const CODE_LANGUAGES = [
   'markdown',
 ];
 
+const CODE_LANGUAGE_LABELS: Record<string, string> = {
+  javascript: 'JavaScript',
+  typescript: 'TypeScript',
+  python: 'Python',
+  go: 'Go',
+  rust: 'Rust',
+  java: 'Java',
+  csharp: 'C#',
+  sql: 'SQL',
+  html: 'HTML',
+  css: 'CSS',
+  json: 'JSON',
+  bash: 'Bash',
+  markdown: 'Markdown',
+  mermaid: 'Mermaid',
+};
+
+export function codeLanguageLabel(language?: string | null): string {
+  if (!language) {
+    return 'Plain Text';
+  }
+  return CODE_LANGUAGE_LABELS[language] || language;
+}
+
 export function highlightCodeBlocks(root: ParentNode = document): void {
   root.querySelectorAll('pre code').forEach((block) => {
     const element = block as HTMLElement;
     const pre = element.closest('pre');
     if (pre) {
+      const language = Array.from(element.classList)
+        .find((className) => className.startsWith('language-'))
+        ?.replace('language-', '');
+      pre.setAttribute('data-code-label', codeLanguageLabel(language || 'javascript'));
       updateLineNumbers(pre, element);
     }
     if (element.dataset.highlighted === 'yes') {

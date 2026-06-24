@@ -85,6 +85,42 @@ export type NoteSortMode = 'updated' | 'created' | 'title' | 'favorite';
 
 export type NoteQuickFilter = 'all' | 'pinned' | 'recent7' | 'recent30' | 'archived';
 
+export type ShareType = 'private' | 'public' | 'team';
+
+export type SharePermission = 'read' | 'comment' | 'edit';
+
+export interface ShareSettings {
+  type: ShareType;
+  permission: SharePermission;
+  linkId: string;
+  updatedAt: number;
+}
+
+export interface SearchResultNote {
+  id: string;
+  title: string;
+  preview: string;
+}
+
+export interface SearchResultTag {
+  tag: string;
+  count: number;
+}
+
+export interface SearchResultCodeBlock {
+  noteId: string;
+  noteTitle: string;
+  language: string;
+  preview: string;
+}
+
+export interface SearchResultGroups {
+  recentNotes: SearchResultNote[];
+  notes: SearchResultNote[];
+  tags: SearchResultTag[];
+  codeBlocks: SearchResultCodeBlock[];
+}
+
 export interface ImportResult {
   title: string;
   content: string;

@@ -91,6 +91,90 @@ button {
   line-height: 1.75;
 }
 
+.marknote-wide-editor .prose-editor {
+  max-width: 1120px;
+}
+
+.marknote-focus-mode {
+  grid-template-rows: 0 1fr 48px;
+}
+
+.marknote-focus-mode > header {
+  display: none;
+}
+
+.marknote-focus-mode .prose-editor {
+  max-width: 820px;
+  min-height: calc(100dvh - 80px);
+}
+
+.marknote-dark {
+  background: #0f172a;
+  color: #f9fafb;
+}
+
+.marknote-dark aside {
+  border-color: #374151;
+  background: #111827;
+}
+
+.marknote-dark main,
+.marknote-dark header,
+.marknote-dark section,
+.marknote-dark footer {
+  border-color: #374151;
+  background: #0f172a;
+  color: #f9fafb;
+}
+
+.marknote-dark button:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.marknote-dark input,
+.marknote-dark select {
+  border-color: #374151;
+  background-color: #111827;
+  color: #f9fafb;
+}
+
+.marknote-dark .prose-editor {
+  color: #f9fafb;
+}
+
+.marknote-dark .prose-editor h1,
+.marknote-dark .prose-editor h2,
+.marknote-dark .prose-editor h3 {
+  color: #f9fafb;
+}
+
+.marknote-dark .prose-editor blockquote {
+  color: #d1d5db;
+}
+
+.marknote-dark [class*="bg-white"] {
+  background-color: #1f2937;
+}
+
+.marknote-dark [class*="text-[#111827]"],
+.marknote-dark [class*="text-[#151a23]"],
+.marknote-dark [class*="text-gray-700"] {
+  color: #f9fafb;
+}
+
+.marknote-dark [class*="text-[#374151]"],
+.marknote-dark [class*="text-[#4b5563]"],
+.marknote-dark [class*="text-[#6b7280]"] {
+  color: #d1d5db;
+}
+
+.marknote-dark [class*="border-[#e5e7eb]"],
+.marknote-dark [class*="border-[#eef0f3]"],
+.marknote-dark [class*="border-gray-200"],
+.marknote-dark [class*="border-gray-100"] {
+  border-color: #374151;
+}
+
 .prose-editor > * + * {
   margin-top: 0.78em;
 }
@@ -318,6 +402,19 @@ button {
   clear: both;
 }
 
+.prose-editor video,
+.prose-editor audio {
+  display: block;
+  width: min(100%, 720px);
+  margin: 1rem 0;
+  border-radius: 8px;
+}
+
+.prose-editor video {
+  border: 1px solid rgba(17, 24, 39, 0.1);
+  background: #111827;
+}
+
 .prose-editor pre {
   position: relative;
   margin: 1rem 0;
@@ -368,7 +465,7 @@ button {
 
 
 .prose-editor pre::before {
-  content: "▰  JavaScript";
+  content: "▰  " attr(data-code-label);
   position: absolute;
   inset: 0 0 auto 0;
   height: 2.1rem;
@@ -380,6 +477,19 @@ button {
   line-height: 2.1rem;
   padding-left: 1rem;
   pointer-events: none;
+}
+
+.prose-editor pre.is-collapsed {
+  max-height: 3.35rem;
+  overflow: hidden;
+}
+
+.prose-editor pre.is-collapsed code {
+  opacity: 0;
+}
+
+.prose-editor pre.is-collapsed::after {
+  content: "";
 }
 
 .prose-editor pre::after {
@@ -421,51 +531,6 @@ button {
   font-size: 12px;
   line-height: 1.7rem;
   pointer-events: none;
-}
-
-.prose-editor pre:has(code.language-typescript)::before {
-  content: "TypeScript";
-}
-
-.prose-editor pre:has(code.language-python)::before {
-  content: "Python";
-}
-
-.prose-editor pre:has(code.language-go)::before {
-  content: "Go";
-}
-
-.prose-editor pre:has(code.language-rust)::before {
-  content: "Rust";
-}
-
-.prose-editor pre:has(code.language-java)::before {
-  content: "Java";
-}
-
-.prose-editor pre:has(code.language-csharp)::before,
-.prose-editor pre:has(code.language-cs)::before {
-  content: "C#";
-}
-
-.prose-editor pre:has(code.language-sql)::before {
-  content: "SQL";
-}
-
-.prose-editor pre:has(code.language-html)::before {
-  content: "HTML";
-}
-
-.prose-editor pre:has(code.language-css)::before {
-  content: "CSS";
-}
-
-.prose-editor pre:has(code.language-json)::before {
-  content: "JSON";
-}
-
-.prose-editor pre:has(code.language-mermaid)::before {
-  content: "Mermaid";
 }
 
 .prose-editor code:not(pre code) {

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import {
   Archive,
   ChevronDown,
@@ -6,6 +7,7 @@ import {
   Box,
   Code2,
   Cloud,
+  Download,
   Folder,
   FolderOpen,
   HelpCircle,
@@ -14,27 +16,46 @@ import {
   Settings,
   Sun,
   Trash2,
+  Upload,
   WalletCards,
   type LucideIcon,
 } from 'lucide-react';
-import { ARCHIVE_FOLDER_ID, CODE_FOLDER_ID, DEFAULT_FOLDER_ID, DEFAULT_TAGS } from '../lib/db';
+import { ARCHIVE_FOLDER_ID, CODE_FOLDER_ID, DEFAULT_FOLDER_ID } from '../lib/db';
 import { getFolderDisplayName, getTagDisplayName, useI18n } from '../i18n';
 import type { SyncSessionState } from '../sync/useSyncSession';
-import type { Folder as NoteFolder, WorkspaceFilter } from '../types';
+import type { Folder as NoteFolder, SearchResultGroups, WorkspaceFilter } from '../types';
+import { tagDotStyle } from '../lib/tags';
 
 interface SidebarProps {
   query: string;
   folders: NoteFolder[];
   activeFilter: WorkspaceFilter;
+  totalNotesCount: number;
   folderCounts: Record<string, number>;
+  tagCounts: Record<string, number>;
+  tags: string[];
+  tagColors: Record<string, string>;
   trashCount: number;
+  storageUsedLabel: string;
+  storagePercent: number;
+  workspaceName: string;
+  searchResults: SearchResultGroups;
   onQueryChange: (value: string) => void;
   onFilterChange: (value: WorkspaceFilter) => void;
+  onWorkspaceChange: (value: string) => void;
+  onSearchNoteSelect: (noteId: string) => void;
+  onSearchTagSelect: (tag: string) => void;
+  onSearchCodeSelect: (noteId: string) => void;
   onCreateFolder: () => void;
+  onCreateTag: () => void;
   onFolderContextMenu: (event: React.MouseEvent, folder: NoteFolder) => void;
   onCreateNote: () => void;
   onImportClick: () => void;
   onExportClick: () => void;
+  onTogglePanel: () => void;
+  onToggleTheme: () => void;
+  collapsed: boolean;
+  darkMode: boolean;
   searchInputRef: React.RefObject<HTMLInputElement>;
   editingFolderId?: string;
   editingFolderName: string;
@@ -48,12 +69,32 @@ export function Sidebar({
   query,
   folders,
   activeFilter,
+  totalNotesCount,
   folderCounts,
+  tagCounts,
+  tags,
+  tagColors,
   trashCount,
+  storageUsedLabel,
+  storagePercent,
+  workspaceName,
+  searchResults,
   onQueryChange,
   onFilterChange,
+  onWorkspaceChange,
+  onSearchNoteSelect,
+  onSearchTagSelect,
+  onSearchCodeSelect,
   onCreateFolder,
+  onCreateTag,
   onFolderContextMenu,
+  onCreateNote,
+  onImportClick,
+  onExportClick,
+  onTogglePanel,
+  onToggleTheme,
+  collapsed,
+  darkMode,
   searchInputRef,
   editingFolderId,
   editingFolderName,
@@ -63,13 +104,36 @@ export function Sidebar({
   sync,
 }: SidebarProps) {
   const { t } = useI18n();
+  const [showAllTags, setShowAllTags] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [workspaces, setWorkspaces] = useState<string[]>(() => readWorkspaceOptions(workspaceName));
+  const tagItems = showAllTags ? tags : tags.slice(0, 5);
+  const moreTags = Math.max(0, tags.length - 5);
+  const syncLabel = sync.syncing ? t('sync.syncing') : sync.error ? '同步失败' : sync.configured ? (sync.lastResult?.ok ? t('editor.saveSaved') : t('sync.ready')) : t('sync.localOnly');
+  const syncClassName = sync.error ? 'text-[#ef4444]' : sync.syncing ? 'text-[#f59e0b]' : 'text-[#22c55e]';
+  const hasSearchQuery = query.trim().length > 0;
+  const showSearchPanel = !collapsed && (searchOpen || hasSearchQuery);
+
+  useEffect(() => {
+    function closeFloatingMenus() {
+      setSearchOpen(false);
+      setWorkspaceOpen(false);
+      setSettingsOpen(false);
+    }
+
+    window.addEventListener('click', closeFloatingMenus);
+    return () => window.removeEventListener('click', closeFloatingMenus);
+  }, []);
   const primaryNavItems = [
     {
       id: 'all',
       active: activeFilter === 'all',
       icon: WalletCards,
       label: t('filter.allNotes'),
-      count: 24,
+      count: totalNotesCount,
       onClick: () => onFilterChange('all'),
     },
     {
@@ -77,7 +141,7 @@ export function Sidebar({
       active: activeFilter === `folder:${DEFAULT_FOLDER_ID}`,
       icon: Archive,
       label: t('folder.library'),
-      count: 12,
+      count: folderCounts[DEFAULT_FOLDER_ID] || 0,
       onClick: () => onFilterChange(`folder:${DEFAULT_FOLDER_ID}`),
     },
     {
@@ -85,7 +149,7 @@ export function Sidebar({
       active: activeFilter === `folder:${CODE_FOLDER_ID}`,
       icon: Code2,
       label: t('folder.codeSnippets'),
-      count: 8,
+      count: folderCounts[CODE_FOLDER_ID] || 0,
       onClick: () => onFilterChange(`folder:${CODE_FOLDER_ID}`),
     },
     {
@@ -93,7 +157,7 @@ export function Sidebar({
       active: activeFilter === `folder:${ARCHIVE_FOLDER_ID}`,
       icon: Box,
       label: t('folder.archive'),
-      count: 2,
+      count: folderCounts[ARCHIVE_FOLDER_ID] || 0,
       onClick: () => onFilterChange(`folder:${ARCHIVE_FOLDER_ID}`),
     },
     {
@@ -105,11 +169,36 @@ export function Sidebar({
       onClick: () => onFilterChange('trash'),
     },
   ];
-  const visibleTags = DEFAULT_TAGS.slice(0, 5);
-  const moreTags = Math.max(0, DEFAULT_TAGS.length - visibleTags.length);
+  function showNotice(message: string) {
+    setNotice(message);
+    window.setTimeout(() => setNotice(''), 1400);
+  }
+
+  function changeWorkspace(name: string) {
+    setWorkspaces((current) => {
+      const next = mergeWorkspaces(current, name);
+      writeWorkspaceOptions(next);
+      return next;
+    });
+    onWorkspaceChange(name);
+    setWorkspaceOpen(false);
+  }
+
+  function createWorkspace() {
+    const name = window.prompt(t('sidebar.workspaceCreatePrompt'), t('sidebar.workspaceNewName'))?.trim();
+    if (!name) {
+      return;
+    }
+    setWorkspaces((current) => {
+      const next = current.includes(name) ? current : [...current, name];
+      writeWorkspaceOptions(next);
+      return next;
+    });
+    changeWorkspace(name);
+  }
 
   return (
-    <aside className="grid h-full w-[270px] shrink-0 grid-rows-[auto_1fr_auto] border-r border-[#e5e7eb] bg-[#f5f6f8]">
+    <aside className={`grid h-full shrink-0 grid-rows-[auto_1fr_auto] border-r border-[#e5e7eb] bg-[#f5f6f8] transition-[width] duration-300 ${collapsed ? 'w-[76px]' : 'w-[270px]'}`}>
       <div className="px-5 pt-4">
         <div className="marknote-fake-traffic-lights mb-3 flex h-4 items-center gap-2">
           <span className="h-3.5 w-3.5 rounded-full bg-[#ff5f57] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)]" />
@@ -117,64 +206,136 @@ export function Sidebar({
           <span className="h-3.5 w-3.5 rounded-full bg-[#28c840] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)]" />
         </div>
 
-        <button
-          type="button"
-          onClick={() => onFilterChange('all')}
-          className="mb-5 flex w-full min-w-0 items-center gap-3 rounded-xl text-left outline-none transition hover:bg-white/70 focus-visible:ring-2 focus-visible:ring-[#2f7df6]/20"
-        >
-          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#2f7df6] text-lg font-semibold text-white shadow-[0_10px_24px_rgba(47,125,246,0.25)]">
+        <div className="relative mb-5 flex min-w-0 items-center gap-3">
+          <button
+            type="button"
+            onClick={() => onFilterChange('all')}
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#2f7df6] text-lg font-semibold text-white shadow-[0_10px_24px_rgba(47,125,246,0.25)] outline-none transition hover:bg-[#2563eb] focus-visible:ring-2 focus-visible:ring-[#2f7df6]/30"
+            aria-label={t('filter.allNotes')}
+            title={t('filter.allNotes')}
+          >
             M
-          </div>
-          <div className="min-w-0 flex-1">
+          </button>
+          <div className={`min-w-0 flex-1 ${collapsed ? 'hidden' : ''}`}>
             <div className="flex items-center gap-2">
               <h1 className="truncate text-[19px] font-semibold leading-tight text-[#151a23]">MarkNote</h1>
               <span className="rounded-md bg-[#dce9ff] px-1.5 py-0.5 text-[11px] font-semibold text-[#2f7df6]">Pro</span>
             </div>
-            <p className="mt-1 flex items-center gap-1 truncate text-[13px] text-[#6b7280]">
-              我的工作空间
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                setWorkspaceOpen((value) => !value);
+                setSearchOpen(false);
+              }}
+              className="mt-1 flex max-w-full items-center gap-1 truncate rounded-md text-left text-[13px] text-[#6b7280] outline-none transition hover:text-[#111827] focus-visible:ring-2 focus-visible:ring-[#2f7df6]/20"
+              aria-haspopup="menu"
+              aria-expanded={workspaceOpen}
+            >
+              <span className="truncate">{workspaceName}</span>
               <ChevronDown size={13} />
-            </p>
+            </button>
           </div>
-        </button>
+          {workspaceOpen && !collapsed ? (
+            <div
+              className="absolute left-0 top-14 z-40 w-full overflow-hidden rounded-xl border border-[#e5e7eb] bg-white p-1 text-sm shadow-[0_18px_45px_rgba(15,23,42,0.16)]"
+              onMouseDown={(event) => event.preventDefault()}
+              role="menu"
+            >
+              {workspaces.map((workspace) => (
+                <button
+                  key={workspace}
+                  type="button"
+                  onClick={() => changeWorkspace(workspace)}
+                  className={`flex h-9 w-full items-center justify-between rounded-lg px-3 text-left ${
+                    workspace === workspaceName ? 'bg-[#eaf2ff] font-semibold text-[#2563eb]' : 'text-[#374151] hover:bg-[#f3f4f6]'
+                  }`}
+                  role="menuitem"
+                >
+                  <span className="truncate">{workspace}</span>
+                  {workspace === workspaceName ? <span className="text-xs">✓</span> : null}
+                </button>
+              ))}
+              <button type="button" onClick={createWorkspace} className="mt-1 flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-[#374151] hover:bg-[#f3f4f6]" role="menuitem">
+                <Plus size={15} />
+                {t('sidebar.workspaceCreate')}
+              </button>
+            </div>
+          ) : null}
+        </div>
 
-        <label className="relative block">
+        <div className={`relative ${collapsed ? 'hidden' : ''}`}>
           <Search className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[#6b7280]" size={17} />
           <input
             ref={searchInputRef}
             value={query}
-            onChange={(event) => onQueryChange(event.target.value)}
+            onChange={(event) => {
+              setSearchOpen(true);
+              onQueryChange(event.target.value);
+            }}
+            onMouseDown={() => setSearchOpen(true)}
+            onClick={() => setSearchOpen(true)}
+            onFocus={() => {
+              setSearchOpen(true);
+              setWorkspaceOpen(false);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                setSearchOpen(false);
+                event.currentTarget.blur();
+              }
+            }}
             className="h-11 w-full rounded-lg border border-transparent bg-[#eaedf2] pl-11 pr-14 text-[14px] text-[#111827] outline-none transition placeholder:text-[#6b7280] focus:border-[#2f7df6]/30 focus:bg-white focus:ring-4 focus:ring-[#2f7df6]/10"
-            placeholder="搜索"
+            placeholder={t('sidebar.searchPlaceholder')}
           />
           <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[12px] text-[#6b7280]">
             ⌘K
           </span>
-        </label>
+          {showSearchPanel ? (
+            <SearchResultsPanel
+              hasSearchQuery={hasSearchQuery}
+              results={searchResults}
+              tagColors={tagColors}
+              onSelectNote={(noteId) => {
+                onSearchNoteSelect(noteId);
+                setSearchOpen(false);
+              }}
+              onSelectTag={(tag) => {
+                onSearchTagSelect(tag);
+                setSearchOpen(false);
+              }}
+              onSelectCode={(noteId) => {
+                onSearchCodeSelect(noteId);
+                setSearchOpen(false);
+              }}
+            />
+          ) : null}
+        </div>
       </div>
 
-      <div className="overflow-y-auto px-5 py-5">
+      <div className={`overflow-y-auto px-5 py-5 ${collapsed ? 'px-3' : ''}`}>
         <div className="mb-6 space-y-1">
           {primaryNavItems.map((item) => (
-            <SidebarNavButton key={item.id} active={item.active} icon={item.icon} label={item.label} count={item.count} onClick={item.onClick} />
+            <SidebarNavButton key={item.id} active={item.active} icon={item.icon} label={item.label} count={item.count} collapsed={collapsed} onClick={item.onClick} />
           ))}
         </div>
 
         <div className="mb-3 h-px bg-[#e2e5ea]" />
 
         <div className="mb-2 flex items-center justify-between px-2 text-[13px] font-medium text-[#6b7280]">
-          <span>标签</span>
+          <span className={collapsed ? 'hidden' : ''}>标签</span>
           <button
             type="button"
-            onClick={onCreateFolder}
+            onClick={onCreateTag}
             className="grid h-6 w-6 place-items-center rounded-md text-[#6b7280] transition hover:bg-white hover:text-[#111827]"
-            aria-label={t('sidebar.newFolder')}
-            title={t('sidebar.newFolder')}
+            aria-label="新建标签"
+            title="新建标签"
           >
             <Plus size={15} />
           </button>
         </div>
         <div className="mb-3 space-y-1">
-          {visibleTags.map((tag, index) => (
+          {tagItems.map((tag) => (
             <button
               key={tag}
               type="button"
@@ -183,18 +344,23 @@ export function Sidebar({
                 activeFilter === `tag:${tag}` ? 'bg-white text-[#111827] shadow-[0_1px_2px_rgba(15,23,42,0.06)]' : 'text-[#4b5563] hover:bg-white/70'
               }`}
             >
-              <span className={`h-3 w-3 shrink-0 rounded-full ${tagDotClassNames[index % tagDotClassNames.length]}`} />
-              <span className="min-w-0 flex-1 truncate">{getTagDisplayName(tag, t)}</span>
-              <span className="text-[13px] text-[#6b7280]">{tagCount(tag, folderCounts, folders)}</span>
+              <span className="h-3 w-3 shrink-0 rounded-full" style={tagDotStyle(tag, tagColors)} />
+              <span className={`min-w-0 flex-1 truncate ${collapsed ? 'hidden' : ''}`}>{getTagDisplayName(tag, t)}</span>
+              <span className={`text-[13px] text-[#6b7280] ${collapsed ? 'hidden' : ''}`}>{tagCounts[tag] || 0}</span>
             </button>
           ))}
           {moreTags > 0 ? (
-            <button type="button" className="flex h-10 w-full items-center justify-between rounded-lg px-3 text-[15px] text-[#4b5563] hover:bg-white/70">
+            <button
+              type="button"
+              onClick={() => setShowAllTags((value) => !value)}
+              className="flex h-10 w-full items-center justify-between rounded-lg px-3 text-[15px] text-[#4b5563] hover:bg-white/70"
+              aria-expanded={showAllTags}
+            >
               <span className="flex items-center gap-2">
                 <ChevronDown size={15} />
-                更多标签
+                <span className={collapsed ? 'hidden' : ''}>{showAllTags ? '收起标签' : '更多标签'}</span>
               </span>
-              <ChevronRight size={15} />
+              <ChevronRight className={showAllTags ? 'rotate-90' : ''} size={15} />
             </button>
           ) : null}
         </div>
@@ -265,19 +431,19 @@ export function Sidebar({
       </div>
 
       <div className="p-5">
-        <div className="mb-4 rounded-xl border border-[#e4e7ed] bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+        <div className={`mb-4 rounded-xl border border-[#e4e7ed] bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] ${collapsed ? 'hidden' : ''}`}>
           <div className="mb-3 flex items-center gap-3">
             <div className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-full bg-[radial-gradient(circle_at_50%_28%,#ffd8ad_0_24%,transparent_25%),radial-gradient(circle_at_40%_34%,#111827_0_4%,transparent_5%),radial-gradient(circle_at_60%_34%,#111827_0_4%,transparent_5%),linear-gradient(180deg,#e9f4ff_0_55%,#57a5ff_56%_100%)] text-sm font-semibold text-white shadow-inner">
               <span className="mt-5 h-5 w-8 rounded-t-full bg-[#1f2937]" aria-hidden="true" />
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <p className="truncate text-[16px] font-semibold text-[#111827]">user124</p>
+                <p className="truncate text-[16px] font-semibold text-[#111827]">{sync.session?.user.email || 'Local Workspace'}</p>
                 <span className="rounded-md bg-[#dce9ff] px-1.5 py-0.5 text-[11px] font-semibold text-[#2f7df6]">Pro</span>
               </div>
-              <p className="mt-1 flex items-center gap-1 text-[13px] text-[#22c55e]">
-                <span className="grid h-4 w-4 place-items-center rounded-full border border-[#22c55e] text-[10px]">✓</span>
-                已同步
+              <p className={`mt-1 flex items-center gap-1 text-[13px] ${syncClassName}`}>
+                <span className="grid h-4 w-4 place-items-center rounded-full border border-current text-[10px]">✓</span>
+                {syncLabel}
               </p>
             </div>
             <button type="button" onClick={() => void sync.syncNow()} className="grid h-8 w-8 place-items-center rounded-lg text-[#6b7280] hover:bg-[#f3f4f6]" title="同步">
@@ -286,45 +452,85 @@ export function Sidebar({
           </div>
           <div className="mb-2 flex items-center justify-between text-[13px] text-[#6b7280]">
             <span>空间使用</span>
-            <span>1.2 GB / 10 GB</span>
+            <span>{storageUsedLabel}</span>
           </div>
           <div className="h-2 overflow-hidden rounded-full bg-[#e5e7eb]">
-            <div className="h-full w-[12%] rounded-full bg-[#2f7df6]" />
+            <div className="h-full rounded-full bg-[#2f7df6]" style={{ width: `${storagePercent}%` }} />
           </div>
         </div>
         <div className="flex items-center justify-between px-2 text-[#374151]">
-          <button type="button" className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white" title="设置"><Settings size={19} /></button>
-          <button type="button" className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white" title="外观"><Sun size={19} /></button>
-          <button type="button" className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white" title="帮助"><HelpCircle size={19} /></button>
-          <button type="button" className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white" title="面板"><ChevronLeft size={19} /></button>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                setSettingsOpen((value) => !value);
+              }}
+              className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white"
+              title="设置"
+              aria-label="设置"
+            >
+              <Settings size={19} />
+            </button>
+            {settingsOpen ? (
+              <div className="absolute bottom-10 left-0 z-40 w-44 overflow-hidden rounded-lg border border-[#e5e7eb] bg-white py-1 text-sm shadow-[0_18px_45px_rgba(15,23,42,0.16)]">
+                <button type="button" onClick={onCreateNote} className="flex h-9 w-full items-center gap-2 px-3 text-left text-[#374151] hover:bg-[#f3f4f6]">
+                  <Plus size={15} />
+                  新建笔记
+                </button>
+                <button type="button" onClick={onCreateFolder} className="flex h-9 w-full items-center gap-2 px-3 text-left text-[#374151] hover:bg-[#f3f4f6]">
+                  <Folder size={15} />
+                  新建文件夹
+                </button>
+                <button type="button" onClick={onImportClick} className="flex h-9 w-full items-center gap-2 px-3 text-left text-[#374151] hover:bg-[#f3f4f6]">
+                  <Upload size={15} />
+                  {t('sidebar.import')}
+                </button>
+                <button type="button" onClick={onExportClick} className="flex h-9 w-full items-center gap-2 px-3 text-left text-[#374151] hover:bg-[#f3f4f6]">
+                  <Download size={15} />
+                  {t('sidebar.export')}
+                </button>
+              </div>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={onToggleTheme}
+            className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white"
+            title={darkMode ? '切换浅色模式' : '切换深色模式'}
+            aria-label={darkMode ? '切换浅色模式' : '切换深色模式'}
+          >
+            <Sun size={19} />
+          </button>
+          <button
+            type="button"
+            onClick={() => showNotice('帮助：⌘K 搜索，⌘N 新建，⌘S 保存')}
+            className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white"
+            title="帮助"
+            aria-label="帮助"
+          >
+            <HelpCircle size={19} />
+          </button>
+          <button type="button" onClick={onTogglePanel} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white" title={collapsed ? '展开侧边栏' : '折叠侧边栏'} aria-label={collapsed ? '展开侧边栏' : '折叠侧边栏'}>
+            {collapsed ? <ChevronRight size={19} /> : <ChevronLeft size={19} />}
+          </button>
         </div>
+        {notice ? <div className="mt-2 rounded-lg bg-[#111827] px-3 py-2 text-xs text-white">{notice}</div> : null}
       </div>
     </aside>
   );
 }
-
-const tagDotClassNames = [
-  'bg-[#2f7df6]',
-  'bg-[#22c55e]',
-  'bg-[#8b5cf6]',
-  'bg-[#f59e0b]',
-  'bg-[#ec6b94]',
-  'bg-[#06b6d4]',
-  'bg-[#10b981]',
-  'bg-[#f97316]',
-  'bg-[#111827]',
-  'bg-[#ef4444]',
-];
 
 interface SidebarNavButtonProps {
   active: boolean;
   icon: LucideIcon;
   label: string;
   count?: number;
+  collapsed: boolean;
   onClick: () => void;
 }
 
-function SidebarNavButton({ active, icon: Icon, label, count, onClick }: SidebarNavButtonProps) {
+function SidebarNavButton({ active, icon: Icon, label, count, collapsed, onClick }: SidebarNavButtonProps) {
   return (
     <button
       type="button"
@@ -336,27 +542,134 @@ function SidebarNavButton({ active, icon: Icon, label, count, onClick }: Sidebar
       }`}
     >
       <Icon size={15} />
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-      {typeof count === 'number' ? <span className="text-[13px] text-[#6b7280]">{count}</span> : null}
+      <span className={`min-w-0 flex-1 truncate ${collapsed ? 'hidden' : ''}`}>{label}</span>
+      {typeof count === 'number' ? <span className={`text-[13px] text-[#6b7280] ${collapsed ? 'hidden' : ''}`}>{count}</span> : null}
     </button>
   );
 }
 
-function tagCount(tag: string, folderCounts: Record<string, number>, folders: NoteFolder[]): number {
-  if (tag === '工作') {
-    return 8;
+function SearchResultsPanel({
+  hasSearchQuery,
+  results,
+  tagColors,
+  onSelectNote,
+  onSelectTag,
+  onSelectCode,
+}: {
+  hasSearchQuery: boolean;
+  results: SearchResultGroups;
+  tagColors: Record<string, string>;
+  onSelectNote: (noteId: string) => void;
+  onSelectTag: (tag: string) => void;
+  onSelectCode: (noteId: string) => void;
+}) {
+  const { t } = useI18n();
+  const hasResults = results.recentNotes.length + results.notes.length + results.tags.length + results.codeBlocks.length > 0;
+
+  return (
+    <div
+      className="absolute left-0 right-0 top-12 z-50 max-h-[560px] overflow-y-auto rounded-xl border border-[#e5e7eb] bg-white p-2 text-sm shadow-[0_24px_70px_rgba(15,23,42,0.18)]"
+      onMouseDown={(event) => event.preventDefault()}
+      data-search-results-panel="true"
+    >
+      {!hasResults ? (
+        <div className="rounded-lg bg-[#f8fafc] px-3 py-4 text-center text-xs text-[#6b7280]">
+          {hasSearchQuery ? t('sidebar.searchEmpty') : t('sidebar.searchNoRecent')}
+        </div>
+      ) : null}
+
+      {!hasSearchQuery ? (
+        <SearchGroup title={t('sidebar.searchRecent')} emptyText={t('sidebar.searchNoRecent')}>
+          {results.recentNotes.map((note) => (
+            <SearchNoteButton key={note.id} title={note.title} preview={note.preview} onClick={() => onSelectNote(note.id)} />
+          ))}
+        </SearchGroup>
+      ) : (
+        <>
+          <SearchGroup title={t('sidebar.searchRecent')}>
+            {results.recentNotes.map((note) => (
+              <SearchNoteButton key={note.id} title={note.title} preview={note.preview} onClick={() => onSelectNote(note.id)} />
+            ))}
+          </SearchGroup>
+          <SearchGroup title={t('sidebar.searchNotes')} emptyText={t('sidebar.searchEmpty')}>
+            {results.notes.map((note) => (
+              <SearchNoteButton key={note.id} title={note.title} preview={note.preview} onClick={() => onSelectNote(note.id)} />
+            ))}
+          </SearchGroup>
+          <SearchGroup title={t('sidebar.searchTags')} emptyText={t('sidebar.searchEmpty')}>
+            {results.tags.map((tag) => (
+              <button
+                key={tag.tag}
+                type="button"
+                onClick={() => onSelectTag(tag.tag)}
+                className="flex h-9 w-full items-center gap-2 rounded-lg px-2 text-left text-[#374151] hover:bg-[#f3f4f6]"
+              >
+                <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={tagDotStyle(tag.tag, tagColors)} />
+                <span className="min-w-0 flex-1 truncate"># {getTagDisplayName(tag.tag, t)}</span>
+                <span className="text-xs text-[#9ca3af]">{tag.count}</span>
+              </button>
+            ))}
+          </SearchGroup>
+          <SearchGroup title={t('sidebar.searchCode')} emptyText={t('sidebar.searchEmpty')}>
+            {results.codeBlocks.map((block, index) => (
+              <button
+                key={`${block.noteId}-${index}-${block.language}`}
+                type="button"
+                onClick={() => onSelectCode(block.noteId)}
+                className="w-full rounded-lg px-2 py-2 text-left hover:bg-[#f3f4f6]"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="min-w-0 truncate text-xs font-semibold text-[#111827]">{block.noteTitle}</span>
+                  <span className="shrink-0 rounded bg-[#eaf2ff] px-1.5 py-0.5 text-[10px] font-semibold uppercase text-[#2563eb]">{block.language}</span>
+                </div>
+                <div className="mt-1 line-clamp-2 font-mono text-[11px] leading-5 text-[#6b7280]">{block.preview}</div>
+              </button>
+            ))}
+          </SearchGroup>
+        </>
+      )}
+    </div>
+  );
+}
+
+function SearchGroup({ title, emptyText, children }: { title: string; emptyText?: string; children: React.ReactNode }) {
+  const hasChildren = Array.isArray(children) ? children.length > 0 : Boolean(children);
+  if (!hasChildren && !emptyText) {
+    return null;
   }
-  if (tag === '个人') {
-    return 6;
+
+  return (
+    <section className="py-1">
+      <div className="mb-1 px-2 text-[11px] font-semibold uppercase text-[#9ca3af]">{title}</div>
+      <div className="space-y-1">{hasChildren ? children : <div className="rounded-lg px-2 py-2 text-xs text-[#9ca3af]">{emptyText}</div>}</div>
+    </section>
+  );
+}
+
+function SearchNoteButton({ title, preview, onClick }: { title: string; preview: string; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="w-full rounded-lg px-2 py-2 text-left hover:bg-[#f3f4f6]">
+      <div className="truncate text-xs font-semibold text-[#111827]">{title}</div>
+      <div className="mt-1 line-clamp-2 text-xs leading-5 text-[#6b7280]">{preview}</div>
+    </button>
+  );
+}
+
+function readWorkspaceOptions(activeWorkspace: string) {
+  try {
+    const raw = window.localStorage.getItem('marknote-workspace-options');
+    const parsed = raw ? (JSON.parse(raw) as string[]) : [];
+    return mergeWorkspaces(parsed, activeWorkspace);
+  } catch {
+    return mergeWorkspaces([], activeWorkspace);
   }
-  if (tag === '代码') {
-    return 8;
-  }
-  if (tag === '学习') {
-    return 4;
-  }
-  if (tag === '灵感') {
-    return 3;
-  }
-  return Math.max(0, folders.length + Object.keys(folderCounts).length);
+}
+
+function writeWorkspaceOptions(workspaces: string[]) {
+  window.localStorage.setItem('marknote-workspace-options', JSON.stringify(workspaces));
+}
+
+function mergeWorkspaces(workspaces: string[], activeWorkspace: string) {
+  const defaults = ['Workspace Pro', 'Personal Space'];
+  return Array.from(new Set([...defaults, activeWorkspace, ...workspaces].filter(Boolean)));
 }
