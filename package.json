@@ -25,7 +25,8 @@
     "dist:win:x64": "npm run desktop:build && npm run package:win:x64",
     "preview": "vite preview --host 127.0.0.1",
     "lint": "eslint .",
-    "test": "tsc -p tsconfig.test.json && node -e \"require('fs').writeFileSync('.tmp-tests/package.json','{\\\"type\\\":\\\"commonjs\\\"}')\" && node .tmp-tests/tests/importExport.test.js && node .tmp-tests/tests/db.test.js && node .tmp-tests/tests/sync.test.js"
+    "check:google-oauth": "node scripts/check-google-oauth.mjs",
+    "test": "tsc -p tsconfig.test.json && node -e \"require('fs').writeFileSync('.tmp-tests/package.json','{\\\"type\\\":\\\"commonjs\\\"}')\" && node .tmp-tests/tests/importExport.test.js && node .tmp-tests/tests/db.test.js && node .tmp-tests/tests/sync.test.js && node .tmp-tests/tests/supabaseAdapter.test.js"
   },
   "build": {
     "appId": "com.marknote.app",

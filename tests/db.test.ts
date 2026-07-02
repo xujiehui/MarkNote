@@ -33,6 +33,14 @@ async function main() {
   assert.equal(seed?.title, '欢迎使用 MarkNote');
   assert.equal(seed?.pinned, true);
   assert.equal(seed?.folderId, DEFAULT_FOLDER_ID);
+  await updateNote(seedId, {
+    title: '我自己的欢迎笔记',
+    content: '<p>不要被启动模板覆盖</p>',
+  });
+  await ensureSeedNote();
+  const editedSeed = await db.notes.get(seedId);
+  assert.equal(editedSeed?.title, '我自己的欢迎笔记');
+  assert.equal(editedSeed?.content, '<p>不要被启动模板覆盖</p>');
 
   const defaultFolders = await db.folders.toArray();
   assert.ok(defaultFolders.length >= 3);

@@ -1,15 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createSyncEngine } from './engine';
 import { getRemoteSyncAdapter } from './adapters';
-import type { AuthSession, SyncResult } from './types';
-
-type AuthMode = 'sign-in' | 'sign-up';
-
-interface AuthInput {
-  email: string;
-  password: string;
-  mode: AuthMode;
-}
+import type { AuthSession, OAuthProvider, SyncResult } from './types';
 
 export interface SyncSessionState {
   configured: boolean;
@@ -19,7 +11,7 @@ export interface SyncSessionState {
   syncing: boolean;
   lastResult: SyncResult | null;
   error: string;
-  signIn: (input: AuthInput) => Promise<void>;
+  signInWithOAuth: (provider: OAuthProvider) => Promise<void>;
   signOut: () => Promise<void>;
   syncNow: () => Promise<SyncResult>;
 }
@@ -32,34 +24,6 @@ export function useSyncSession(): SyncSessionState {
   const [syncing, setSyncing] = useState(false);
   const [lastResult, setLastResult] = useState<SyncResult | null>(null);
   const [error, setError] = useState('');
-
-  useEffect(() => {
-    if (!adapter.configured) {
-      setLoading(false);
-      return;
-    }
-    let cancelled = false;
-    adapter
-      .getSession()
-      .then((nextSession) => {
-        if (!cancelled) {
-          setSession(nextSession);
-        }
-      })
-      .catch((nextError: unknown) => {
-        if (!cancelled) {
-          setError(errorMessage(nextError));
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [adapter]);
 
   const syncNow = useCallback(async () => {
     setSyncing(true);
@@ -76,21 +40,75 @@ export function useSyncSession(): SyncSessionState {
     }
   }, [engine]);
 
-  const signIn = useCallback(
-    async (input: AuthInput) => {
+  useEffect(() => {
+    if (!adapter.configured) {
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    adapter
+      .getSession()
+      .then((nextSession) => {
+        if (!cancelled) {
+          setSession(nextSession);
+          if (nextSession) {
+            void syncNow();
+          }
+        }
+      })
+      .catch((nextError: unknown) => {
+        if (!cancelled) {
+          setError(errorMessage(nextError));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [adapter, syncNow]);
+
+  useEffect(() => {
+    const unsubscribe = window.marknoteDesktop?.onAuthCallback?.((callbackUrl) => {
+      setLoading(true);
+      setError('');
+      adapter
+        .completeOAuthSignIn(callbackUrl)
+        .then((nextSession) => {
+          setSession(nextSession);
+          if (nextSession) {
+            void syncNow();
+          }
+        })
+        .catch((nextError: unknown) => {
+          setError(errorMessage(nextError));
+        })
+        .finally(() => {
+          setLoading(false);
+        });
+    });
+    return () => {
+      unsubscribe?.();
+    };
+  }, [adapter, syncNow]);
+
+  const signInWithOAuth = useCallback(
+    async (provider: OAuthProvider) => {
       setLoading(true);
       setError('');
       try {
-        const nextSession = input.mode === 'sign-up' ? await adapter.signUp(input) : await adapter.signIn(input);
-        setSession(nextSession);
-        await syncNow();
+        await adapter.signInWithOAuth(provider);
       } catch (nextError) {
         setError(errorMessage(nextError));
+        return;
       } finally {
         setLoading(false);
       }
     },
-    [adapter, syncNow],
+    [adapter],
   );
 
   const signOut = useCallback(async () => {
@@ -115,7 +133,7 @@ export function useSyncSession(): SyncSessionState {
     syncing,
     lastResult,
     error,
-    signIn,
+    signInWithOAuth,
     signOut,
     syncNow,
   };

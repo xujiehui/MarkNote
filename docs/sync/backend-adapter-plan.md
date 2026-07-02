@@ -16,6 +16,7 @@ Required environment variables:
 VITE_SYNC_PROVIDER=supabase
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_or_anon_key
+VITE_SUPABASE_AUTH_REDIRECT_URL=http://127.0.0.1:5173/?app=1
 ```
 
 If these variables are missing, MarkNote runs in local-only mode.
@@ -24,7 +25,7 @@ If these variables are missing, MarkNote runs in local-only mode.
 
 Any future backend must implement:
 
-- `getSession`, `signIn`, `signUp`, `signOut`
+- `getSession`, `signInWithOAuth`, `signOut`
 - `registerDevice`
 - `pull(lastPulledAt)`
 - `push(payload)`
@@ -109,10 +110,14 @@ Future improvements:
 
 1. Create a Supabase project.
 2. Apply `supabase/migrations/202606190001_marknote_sync_schema.sql`.
-3. Enable email/password Auth or magic links.
-4. Set the Vite environment variables.
-5. Run the app, register an account, and click Sync.
-6. Run Supabase Security Advisor before production.
+3. Create a Google Cloud Web application OAuth client.
+4. Add the Supabase callback URL to that Google OAuth client's Authorized redirect URIs: `https://<project-ref>.supabase.co/auth/v1/callback`.
+5. Enable the Google Auth provider in the Supabase Dashboard and paste the Google OAuth Client ID and Client Secret.
+6. Add the MarkNote app URL to Supabase Auth redirect URLs, for example `http://127.0.0.1:5173/?app=1` in local development and the production app URL after deployment. For the packaged desktop app, also add `marknote://auth/callback`.
+7. Set the Vite environment variables.
+8. Run `npm run check:google-oauth` and confirm Google accepts the configured OAuth client. If it reports `invalid_client`, the Google OAuth client configured in Supabase is missing, wrong, or not a Web application client.
+9. Run the app, sign in with Google, and click Sync.
+10. Run Supabase Security Advisor before production.
 
 If Supabase CLI is available, prefer:
 

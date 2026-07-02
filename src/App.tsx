@@ -171,8 +171,17 @@ function NoteWorkspace() {
     if (!editingFolderId || folders.some((folder) => folder.id === editingFolderId)) {
       return;
     }
-    setEditingFolderId('');
-    setEditingFolderName('');
+    let cancelled = false;
+    void db.folders.get(editingFolderId).then((folder) => {
+      if (cancelled || folder) {
+        return;
+      }
+      setEditingFolderId('');
+      setEditingFolderName('');
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [editingFolderId, folders]);
 
   const addSnapshot = useCallback(

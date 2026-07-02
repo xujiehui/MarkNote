@@ -1,5 +1,4 @@
-import { Cloud, CloudOff, LogOut, RefreshCcw, UserPlus } from 'lucide-react';
-import { useState } from 'react';
+import { Chrome, Cloud, CloudOff, LogOut, RefreshCcw } from 'lucide-react';
 import { useI18n } from '../i18n';
 import type { SyncSessionState } from '../sync/useSyncSession';
 
@@ -9,9 +8,6 @@ interface SyncPanelProps {
 
 export function SyncPanel({ sync }: SyncPanelProps) {
   const { t } = useI18n();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [mode, setMode] = useState<'sign-in' | 'sign-up'>('sign-in');
 
   if (!sync.configured) {
     return (
@@ -63,61 +59,22 @@ export function SyncPanel({ sync }: SyncPanelProps) {
   }
 
   return (
-    <form
-      className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void sync.signIn({ email, password, mode });
-      }}
-    >
+    <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
       <div className="mb-2 flex items-center gap-2 font-medium text-gray-800">
         <Cloud size={14} className="text-primary-600" />
         {t('sync.signInTitle')}
       </div>
-      <div className="mb-2 grid grid-cols-2 rounded-md bg-gray-100 p-0.5">
-        <button
-          type="button"
-          onClick={() => setMode('sign-in')}
-          className={`h-7 rounded text-xs ${mode === 'sign-in' ? 'bg-white text-gray-900 shadow-subtle' : 'text-gray-500'}`}
-        >
-          {t('sync.signIn')}
-        </button>
-        <button
-          type="button"
-          onClick={() => setMode('sign-up')}
-          className={`h-7 rounded text-xs ${mode === 'sign-up' ? 'bg-white text-gray-900 shadow-subtle' : 'text-gray-500'}`}
-        >
-          {t('sync.signUp')}
-        </button>
-      </div>
-      <input
-        value={email}
-        onChange={(event) => setEmail(event.target.value)}
-        type="email"
-        autoComplete="email"
-        required
-        className="mb-2 h-8 w-full rounded-md border border-gray-200 px-2 text-xs outline-none focus:border-primary-300 focus:ring-2 focus:ring-primary-100"
-        placeholder={t('sync.email')}
-      />
-      <input
-        value={password}
-        onChange={(event) => setPassword(event.target.value)}
-        type="password"
-        autoComplete={mode === 'sign-up' ? 'new-password' : 'current-password'}
-        required
-        minLength={6}
-        className="mb-2 h-8 w-full rounded-md border border-gray-200 px-2 text-xs outline-none focus:border-primary-300 focus:ring-2 focus:ring-primary-100"
-        placeholder={t('sync.password')}
-      />
+      <p className="mb-2 leading-5 text-gray-500">{t('sync.oauthHint')}</p>
       {sync.error ? <div className="mb-2 text-xs text-error">{sync.error}</div> : null}
       <button
-        type="submit"
+        type="button"
+        onClick={() => void sync.signInWithOAuth('google')}
         disabled={sync.loading}
         className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-primary-600 px-2 text-xs font-medium text-white transition hover:bg-primary-700 disabled:opacity-60"
       >
-        <UserPlus size={13} />
-        {sync.loading ? t('sync.loading') : mode === 'sign-up' ? t('sync.createAccount') : t('sync.signInAction')}
+        <Chrome size={13} />
+        {sync.loading ? t('sync.loading') : t('sync.signInWithGoogle')}
       </button>
-    </form>
+    </div>
   );
 }

@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Folder, ImageAttachment, Note, SyncDevice } from '../types';
-import type { AuthSession, PushPayload, RemoteSnapshot, RemoteSyncAdapter, SignInInput, SignUpInput } from './types';
+import { readSyncEnv } from './env';
+import type { AuthSession, OAuthProvider, PushPayload, RemoteSnapshot, RemoteSyncAdapter } from './types';
 
 const FOLDERS_TABLE = 'folders';
 const NOTES_TABLE = 'notes';
@@ -58,10 +59,12 @@ export class SupabaseSyncAdapter implements RemoteSyncAdapter {
   readonly name = 'Supabase';
   readonly configured: boolean;
   private readonly client: SupabaseClient | null;
+  private readonly url: string | undefined;
 
-  constructor(url: string | undefined, publishableKey: string | undefined) {
+  constructor(url: string | undefined, publishableKey: string | undefined, client?: SupabaseClient) {
+    this.url = url;
     this.configured = Boolean(url && publishableKey);
-    this.client = this.configured && url && publishableKey ? createClient(url, publishableKey) : null;
+    this.client = client ?? (this.configured && url && publishableKey ? createClient(url, publishableKey) : null);
   }
 
   async getSession(): Promise<AuthSession | null> {
@@ -85,43 +88,54 @@ export class SupabaseSyncAdapter implements RemoteSyncAdapter {
     };
   }
 
-  async signIn(input: SignInInput): Promise<AuthSession> {
+  async signInWithOAuth(provider: OAuthProvider): Promise<void> {
+    await assertSupabaseProjectReachable(this.url);
     const client = this.requireClient();
-    const { data, error } = await client.auth.signInWithPassword({
-      email: input.email,
-      password: input.password,
-    });
-    if (error || !data.session?.user) {
-      throw new Error(error?.message || 'Unable to sign in.');
-    }
-    return {
-      user: {
-        id: data.session.user.id,
-        email: data.session.user.email,
+    const { data, error } = await client.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: oauthRedirectUrl(),
+        skipBrowserRedirect: Boolean(window.marknoteDesktop),
       },
-      accessToken: data.session.access_token,
-    };
+    });
+    if (error) {
+      throw new Error(error.message);
+    }
+    if (window.marknoteDesktop && data.url) {
+      await window.marknoteDesktop.openExternal(data.url);
+    }
   }
 
-  async signUp(input: SignUpInput): Promise<AuthSession> {
+  async completeOAuthSignIn(callbackUrl: string): Promise<AuthSession | null> {
     const client = this.requireClient();
-    const { data, error } = await client.auth.signUp({
-      email: input.email,
-      password: input.password,
-      options: {
-        data: input.displayName ? { display_name: input.displayName } : undefined,
-      },
-    });
-    if (error || !data.user) {
-      throw new Error(error?.message || 'Unable to create account.');
+    const url = new URL(callbackUrl);
+    const hash = new URLSearchParams(url.hash.replace(/^#/, ''));
+    const code = url.searchParams.get('code');
+    const accessToken = hash.get('access_token');
+    const refreshToken = hash.get('refresh_token');
+    const errorDescription =
+      url.searchParams.get('error_description') ||
+      url.searchParams.get('error') ||
+      hash.get('error_description') ||
+      hash.get('error');
+    if (errorDescription) {
+      throw new Error(errorDescription);
     }
-    return {
-      user: {
-        id: data.user.id,
-        email: data.user.email,
-      },
-      accessToken: data.session?.access_token,
-    };
+    if (code) {
+      const { error } = await client.auth.exchangeCodeForSession(code);
+      if (error) {
+        throw new Error(error.message);
+      }
+    } else if (accessToken && refreshToken) {
+      const { error } = await client.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      });
+      if (error) {
+        throw new Error(error.message);
+      }
+    }
+    return this.getSession();
   }
 
   async signOut(): Promise<void> {
@@ -241,8 +255,7 @@ export class SupabaseSyncAdapter implements RemoteSyncAdapter {
     if (error) {
       throw new Error(error.message);
     }
-    const { data } = client.storage.from(ATTACHMENTS_BUCKET).getPublicUrl(storagePath);
-    return { storagePath, publicUrl: data.publicUrl };
+    return { storagePath };
   }
 
   private requireClient(): SupabaseClient {
@@ -361,6 +374,61 @@ function dataUrlToBlob(dataUrl: string, mimeType: string): Blob {
     bytes[index] = binary.charCodeAt(index);
   }
   return new Blob([bytes], { type: mimeType });
+}
+
+async function assertSupabaseProjectReachable(url: string | undefined): Promise<void> {
+  if (!url) {
+    return;
+  }
+  let healthUrl: URL;
+  try {
+    healthUrl = new URL('/auth/v1/health', url);
+  } catch {
+    throw new Error('Supabase project URL is invalid. Check VITE_SUPABASE_URL.');
+  }
+  if (!healthUrl.hostname.endsWith('.supabase.co')) {
+    return;
+  }
+  try {
+    await fetch(healthUrl, {
+      method: 'HEAD',
+      mode: 'no-cors',
+      cache: 'no-store',
+    });
+  } catch (error) {
+    if (isNameResolutionError(error)) {
+      throw new Error('Supabase project URL cannot be resolved. Check VITE_SUPABASE_URL points to an active project.');
+    }
+  }
+}
+
+function isNameResolutionError(error: unknown): boolean {
+  const message = errorMessage(error).toLowerCase();
+  return message.includes('enotfound') || message.includes('could not resolve') || message.includes('name_not_resolved');
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function oauthRedirectUrl(): string | undefined {
+  if (window.marknoteDesktop) {
+    return 'marknote://auth/callback';
+  }
+
+  const configured = readSyncEnv('VITE_SUPABASE_AUTH_REDIRECT_URL');
+  if (configured) {
+    return configured;
+  }
+
+  if (typeof window === 'undefined' || !window.location.origin.startsWith('http')) {
+    return undefined;
+  }
+
+  const url = new URL(window.location.href);
+  url.hash = '';
+  url.searchParams.set('app', '1');
+  return url.toString();
 }
 
 async function softDeleteRemote(client: SupabaseClient, table: string, id: string, deletedAt: string) {

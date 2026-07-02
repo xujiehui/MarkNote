@@ -12,14 +12,7 @@ export interface AuthSession {
   accessToken?: string;
 }
 
-export interface SignInInput {
-  email: string;
-  password: string;
-}
-
-export interface SignUpInput extends SignInInput {
-  displayName?: string;
-}
+export type OAuthProvider = 'google' | 'github';
 
 export interface RemoteSnapshot {
   folders: Folder[];
@@ -44,8 +37,8 @@ export interface RemoteSyncAdapter {
   readonly name: string;
   readonly configured: boolean;
   getSession(): Promise<AuthSession | null>;
-  signIn(input: SignInInput): Promise<AuthSession>;
-  signUp(input: SignUpInput): Promise<AuthSession>;
+  signInWithOAuth(provider: OAuthProvider): Promise<void>;
+  completeOAuthSignIn(callbackUrl: string): Promise<AuthSession | null>;
   signOut(): Promise<void>;
   registerDevice(device: SyncDevice): Promise<void>;
   pull(lastPulledAt: number): Promise<RemoteSnapshot>;

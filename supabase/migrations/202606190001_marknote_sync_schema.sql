@@ -65,11 +65,48 @@ create index if not exists notes_user_folder_idx on public.notes(user_id, folder
 create index if not exists attachments_user_updated_idx on public.attachments(user_id, updated_at);
 create index if not exists attachments_user_note_idx on public.attachments(user_id, note_id);
 
+grant usage on schema public to authenticated;
+grant select, insert, update, delete on table public.profiles to authenticated;
+grant select, insert, update, delete on table public.devices to authenticated;
+grant select, insert, update, delete on table public.folders to authenticated;
+grant select, insert, update, delete on table public.notes to authenticated;
+grant select, insert, update, delete on table public.attachments to authenticated;
+
 alter table public.profiles enable row level security;
 alter table public.devices enable row level security;
 alter table public.folders enable row level security;
 alter table public.notes enable row level security;
 alter table public.attachments enable row level security;
+
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.profiles (id, display_name)
+  values (
+    new.id,
+    coalesce(
+      new.raw_user_meta_data->>'display_name',
+      new.raw_user_meta_data->>'full_name',
+      new.raw_user_meta_data->>'name',
+      new.email
+    )
+  )
+  on conflict (id) do update
+    set display_name = coalesce(excluded.display_name, public.profiles.display_name);
+  return new;
+end;
+$$;
+
+revoke all on function public.handle_new_user() from public, anon, authenticated;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
 
 create policy "Users can read own profile"
   on public.profiles for select
@@ -174,6 +211,8 @@ create policy "Users can delete own attachments"
 insert into storage.buckets (id, name, public)
 values ('attachments', 'attachments', false)
 on conflict (id) do nothing;
+
+grant select, insert, update, delete on table storage.objects to authenticated;
 
 create policy "Users can read own attachment objects"
   on storage.objects for select

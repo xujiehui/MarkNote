@@ -36,7 +36,7 @@ export class SyncEngine {
 
       const state = await getSyncState(this.adapter.id, session.user.id, device.id);
       const queueItems = await db.syncQueue.orderBy('updatedAt').toArray();
-      const payload = await buildPushPayload(queueItems);
+      const payload = await buildPushPayload(queueItems, this.adapter);
       const pushedCount = payload.folders.length + payload.notes.length + payload.attachments.length
         + payload.deleted.folders.length + payload.deleted.notes.length + payload.deleted.attachments.length;
 
@@ -115,7 +115,7 @@ async function ensureLocalChangesQueued(): Promise<void> {
   });
 }
 
-async function buildPushPayload(queueItems: SyncQueueItem[]): Promise<PushPayload> {
+async function buildPushPayload(queueItems: SyncQueueItem[], adapter: RemoteSyncAdapter): Promise<PushPayload> {
   const payload: PushPayload = {
     folders: [],
     notes: [],
@@ -136,24 +136,52 @@ async function buildPushPayload(queueItems: SyncQueueItem[]): Promise<PushPayloa
     if (item.entity === 'folder') {
       const folder = await db.folders.get(item.entityId);
       if (folder) {
+        if (folder.deletedAt) {
+          payload.deleted.folders.push(folder.id);
+          continue;
+        }
         payload.folders.push(folder);
       }
     }
     if (item.entity === 'note') {
       const note = await db.notes.get(item.entityId);
       if (note) {
+        if (note.deletedAt) {
+          payload.deleted.notes.push(note.id);
+          continue;
+        }
         payload.notes.push(note);
       }
     }
     if (item.entity === 'attachment') {
       const attachment = await db.images.get(item.entityId);
       if (attachment) {
-        payload.attachments.push(attachment);
+        if (attachment.deletedAt) {
+          payload.deleted.attachments.push(attachment.id);
+          continue;
+        }
+        payload.attachments.push(await prepareAttachmentForPush(attachment, adapter));
       }
     }
   }
 
   return payload;
+}
+
+async function prepareAttachmentForPush(attachment: ImageAttachment, adapter: RemoteSyncAdapter): Promise<ImageAttachment> {
+  if (attachment.storagePath || !attachment.data || !adapter.uploadAttachment) {
+    return attachment;
+  }
+  const uploaded = await adapter.uploadAttachment(attachment);
+  const now = Date.now();
+  const nextAttachment: ImageAttachment = {
+    ...attachment,
+    storagePath: uploaded.storagePath,
+    data: attachment.data,
+    updatedAt: attachment.updatedAt ?? now,
+  };
+  await db.images.put(nextAttachment);
+  return nextAttachment;
 }
 
 function pushDeleted(payload: PushPayload, entity: SyncEntity, entityId: string): void {
@@ -199,13 +227,6 @@ async function applyRemoteNote(remote: Note): Promise<number> {
   const local = await db.notes.get(remote.id);
   if (!shouldApplyRemote(local, remote.updatedAt)) {
     return 0;
-  }
-  if (remote.deletedAt) {
-    await db.transaction('rw', db.notes, db.images, async () => {
-      await db.images.where('noteId').equals(remote.id).delete();
-      await db.notes.delete(remote.id);
-    });
-    return 1;
   }
   await upsertNote(remote, { enqueueSync: false });
   return 1;

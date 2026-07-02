@@ -149,10 +149,8 @@ export async function ensureSeedNote(): Promise<string> {
   if (welcome) {
     await db.notes.update(welcome.id, {
       folderId: welcome.folderId || DEFAULT_FOLDER_ID,
-      content: WELCOME_CONTENT,
-      rawContent: stripHtml(WELCOME_CONTENT),
-      tags: ['资料库', '个人'],
-      pinned: true,
+      tags: welcome.tags?.length ? welcome.tags : ['资料库', '个人'],
+      pinned: welcome.pinned ?? true,
     });
     await ensureSampleNotes();
     return welcome.id;

@@ -53,6 +53,16 @@ cp .env.example .env.local
 
 Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`, then apply the SQL in `supabase/migrations/202606190001_marknote_sync_schema.sql` to your Supabase project.
 
+In Google Cloud, create a Web application OAuth client and add your Supabase callback URL as an Authorized redirect URI: `https://<project-ref>.supabase.co/auth/v1/callback`. In Supabase Auth, enable the Google provider and paste that OAuth Client ID and Client Secret. Then add your local and production MarkNote URLs to Supabase Auth redirect URLs, for example `http://127.0.0.1:5173/?app=1`; for the packaged desktop app, also add `marknote://auth/callback`. If the app is not served from the current browser URL, set `VITE_SUPABASE_AUTH_REDIRECT_URL` explicitly.
+
+Before testing the button in the app, run:
+
+```bash
+npm run check:google-oauth
+```
+
+This verifies that `VITE_SUPABASE_URL` resolves, Supabase Auth redirects the Google provider flow to Google, and Google accepts the configured OAuth client. A DNS failure means the project URL is wrong, inactive, or not reachable yet. `invalid_client` means the Google OAuth Client ID or Client Secret configured in Supabase Auth does not match a valid Google Cloud Web OAuth client.
+
 The sync layer is adapter-based. Supabase is the first implementation, and the migration plan for custom Postgres APIs, Cloudflare D1/R2, or self-hosted Supabase lives in `docs/sync/backend-adapter-plan.md`.
 
 ### Desktop App
@@ -140,6 +150,16 @@ cp .env.example .env.local
 ```
 
 设置 `VITE_SUPABASE_URL` 和 `VITE_SUPABASE_PUBLISHABLE_KEY`，然后将 `supabase/migrations/202606190001_marknote_sync_schema.sql` 中的 SQL 应用到 Supabase 项目。
+
+在 Google Cloud 中创建 Web application 类型的 OAuth client，并把 Supabase callback URL 加到 Authorized redirect URI：`https://<project-ref>.supabase.co/auth/v1/callback`。然后在 Supabase Auth 中启用 Google provider，填入这个 OAuth Client ID 和 Client Secret。接着把本地和生产 MarkNote URL 加到 Supabase Auth redirect URLs，例如 `http://127.0.0.1:5173/?app=1`；如果使用打包后的桌面应用，还要加入 `marknote://auth/callback`。如果应用不是从当前浏览器 URL 提供服务，请显式设置 `VITE_SUPABASE_AUTH_REDIRECT_URL`。
+
+在应用里点击登录前，先运行：
+
+```bash
+npm run check:google-oauth
+```
+
+它会验证 `VITE_SUPABASE_URL` 是否可解析、Supabase Auth 的 Google provider 是否会跳转到 Google，以及 Google 是否接受当前 OAuth client。这里如果出现 DNS 失败，说明项目 URL 错误、项目未激活，或当前网络还访问不到；如果出现 `invalid_client`，说明 Supabase Auth 中配置的 Google OAuth Client ID 或 Secret 没有对应到有效的 Google Cloud Web OAuth client。
 
 同步层使用 adapter 设计。Supabase 是第一版实现，未来迁移到自建 Postgres API、Cloudflare D1/R2 或自托管 Supabase 的方案见 `docs/sync/backend-adapter-plan.md`。
 

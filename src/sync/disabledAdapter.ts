@@ -1,4 +1,4 @@
-import type { AuthSession, RemoteSnapshot, RemoteSyncAdapter, SignInInput, SignUpInput } from './types';
+import type { AuthSession, OAuthProvider, RemoteSnapshot, RemoteSyncAdapter } from './types';
 import { SyncUnavailableError } from './types';
 
 export class DisabledSyncAdapter implements RemoteSyncAdapter {
@@ -10,13 +10,13 @@ export class DisabledSyncAdapter implements RemoteSyncAdapter {
     return null;
   }
 
-  async signIn(_input: SignInInput): Promise<AuthSession> {
-    void _input;
+  async signInWithOAuth(_provider: OAuthProvider): Promise<void> {
+    void _provider;
     throw new SyncUnavailableError();
   }
 
-  async signUp(_input: SignUpInput): Promise<AuthSession> {
-    void _input;
+  async completeOAuthSignIn(_callbackUrl: string): Promise<AuthSession | null> {
+    void _callbackUrl;
     throw new SyncUnavailableError();
   }
 

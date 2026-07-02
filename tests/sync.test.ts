@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import 'fake-indexeddb/auto';
 import { JSDOM } from 'jsdom';
-import { createFolder, createNote, db, ensureDefaultFolders } from '../src/lib/db';
+import { createFolder, createNote, db, ensureDefaultFolders, softDeleteNote } from '../src/lib/db';
 import { createSyncEngine } from '../src/sync/engine';
-import type { PushPayload, RemoteSnapshot, RemoteSyncAdapter, SignInInput, SignUpInput } from '../src/sync/types';
+import type { OAuthProvider, PushPayload, RemoteSnapshot, RemoteSyncAdapter } from '../src/sync/types';
 import type { SyncDevice } from '../src/types';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', {
@@ -33,13 +33,13 @@ class MemoryAdapter implements RemoteSyncAdapter {
     return { user: { id: 'user-1', email: 'sync@example.com' } };
   }
 
-  async signIn(_input: SignInInput) {
-    void _input;
-    return this.getSession();
+  async signInWithOAuth(_provider: OAuthProvider) {
+    void _provider;
+    return undefined;
   }
 
-  async signUp(_input: SignUpInput) {
-    void _input;
+  async completeOAuthSignIn(_callbackUrl: string) {
+    void _callbackUrl;
     return this.getSession();
   }
 
@@ -60,6 +60,10 @@ class MemoryAdapter implements RemoteSyncAdapter {
   async push(payload: PushPayload) {
     this.pushed.push(payload);
     return { syncedAt: 1000 };
+  }
+
+  async uploadAttachment() {
+    return { storagePath: 'user-1/note-1/image-1' };
   }
 }
 
@@ -131,7 +135,21 @@ async function main() {
   };
   const third = await engine.syncNow();
   assert.equal(third.ok, true);
-  assert.equal(await db.notes.get(note.id), undefined);
+  assert.equal((await db.notes.get(note.id))?.deletedAt, note.updatedAt + 20);
+
+  await softDeleteNote(note.id);
+  adapter.snapshot = {
+    folders: [],
+    notes: [],
+    attachments: [],
+    serverTime: 5000,
+  };
+  const fourth = await engine.syncNow();
+  assert.equal(fourth.ok, true);
+  const fourthPayload = adapter.pushed.at(-1);
+  assert.ok(fourthPayload);
+  assert.deepEqual(fourthPayload.notes.map((item) => item.id), []);
+  assert.deepEqual(fourthPayload.deleted.notes, [note.id]);
 
   console.log('sync tests passed');
 }

@@ -25,6 +25,7 @@ import { getFolderDisplayName, getTagDisplayName, useI18n } from '../i18n';
 import type { SyncSessionState } from '../sync/useSyncSession';
 import type { Folder as NoteFolder, SearchResultGroups, WorkspaceFilter } from '../types';
 import { tagDotStyle } from '../lib/tags';
+import { SyncPanel } from './SyncPanel';
 
 interface SidebarProps {
   query: string;
@@ -109,11 +110,23 @@ export function Sidebar({
   const [notice, setNotice] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [syncPanelOpen, setSyncPanelOpen] = useState(false);
   const [workspaces, setWorkspaces] = useState<string[]>(() => readWorkspaceOptions(workspaceName));
   const tagItems = showAllTags ? tags : tags.slice(0, 5);
   const moreTags = Math.max(0, tags.length - 5);
-  const syncLabel = sync.syncing ? t('sync.syncing') : sync.error ? '同步失败' : sync.configured ? (sync.lastResult?.ok ? t('editor.saveSaved') : t('sync.ready')) : t('sync.localOnly');
-  const syncClassName = sync.error ? 'text-[#ef4444]' : sync.syncing ? 'text-[#f59e0b]' : 'text-[#22c55e]';
+  const customFolders = folders.filter((folder) => ![DEFAULT_FOLDER_ID, CODE_FOLDER_ID, ARCHIVE_FOLDER_ID].includes(folder.id));
+  const syncLabel = sync.syncing
+    ? t('sync.syncing')
+    : sync.error
+      ? t('sync.failed')
+      : !sync.configured
+        ? t('sync.localOnly')
+        : sync.session
+          ? sync.lastResult?.ok
+            ? t('sync.synced')
+            : t('sync.ready')
+          : t('sync.signInRequired');
+  const syncClassName = sync.error ? 'text-[#ef4444]' : sync.syncing ? 'text-[#f59e0b]' : sync.configured && sync.session ? 'text-[#22c55e]' : 'text-[#6b7280]';
   const hasSearchQuery = query.trim().length > 0;
   const showSearchPanel = !collapsed && (searchOpen || hasSearchQuery);
 
@@ -122,6 +135,7 @@ export function Sidebar({
       setSearchOpen(false);
       setWorkspaceOpen(false);
       setSettingsOpen(false);
+      setSyncPanelOpen(false);
     }
 
     window.addEventListener('click', closeFloatingMenus);
@@ -199,7 +213,7 @@ export function Sidebar({
 
   return (
     <aside className={`grid h-full shrink-0 grid-rows-[auto_1fr_auto] border-r border-[#e5e7eb] bg-[#f5f6f8] transition-[width] duration-300 ${collapsed ? 'w-[76px]' : 'w-[270px]'}`}>
-      <div className="px-5 pt-4">
+      <div className="min-w-0 px-5 pt-4">
         <div className="marknote-fake-traffic-lights mb-3 flex h-4 items-center gap-2">
           <span className="h-3.5 w-3.5 rounded-full bg-[#ff5f57] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)]" />
           <span className="h-3.5 w-3.5 rounded-full bg-[#ffbd2e] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)]" />
@@ -227,6 +241,7 @@ export function Sidebar({
                 event.stopPropagation();
                 setWorkspaceOpen((value) => !value);
                 setSearchOpen(false);
+                setSyncPanelOpen(false);
               }}
               className="mt-1 flex max-w-full items-center gap-1 truncate rounded-md text-left text-[13px] text-[#6b7280] outline-none transition hover:text-[#111827] focus-visible:ring-2 focus-visible:ring-[#2f7df6]/20"
               aria-haspopup="menu"
@@ -278,6 +293,7 @@ export function Sidebar({
             onFocus={() => {
               setSearchOpen(true);
               setWorkspaceOpen(false);
+              setSyncPanelOpen(false);
             }}
             onKeyDown={(event) => {
               if (event.key === 'Escape') {
@@ -313,7 +329,7 @@ export function Sidebar({
         </div>
       </div>
 
-      <div className={`overflow-y-auto px-5 py-5 ${collapsed ? 'px-3' : ''}`}>
+      <div className={`min-w-0 overflow-x-hidden overflow-y-auto px-5 py-5 ${collapsed ? 'px-3' : ''}`}>
         <div className="mb-6 space-y-1">
           {primaryNavItems.map((item) => (
             <SidebarNavButton key={item.id} active={item.active} icon={item.icon} label={item.label} count={item.count} collapsed={collapsed} onClick={item.onClick} />
@@ -323,13 +339,93 @@ export function Sidebar({
         <div className="mb-3 h-px bg-[#e2e5ea]" />
 
         <div className="mb-2 flex items-center justify-between px-2 text-[13px] font-medium text-[#6b7280]">
-          <span className={collapsed ? 'hidden' : ''}>标签</span>
+          <span className={collapsed ? 'hidden' : ''}>{t('sidebar.folders')}</span>
+          <button
+            type="button"
+            onClick={onCreateFolder}
+            className="grid h-6 w-6 place-items-center rounded-md text-[#6b7280] transition hover:bg-white hover:text-[#111827]"
+            aria-label={t('sidebar.newFolder')}
+            title={t('sidebar.newFolder')}
+          >
+            <Plus size={15} />
+          </button>
+        </div>
+        <div className="mb-5 space-y-1">
+          {customFolders.map((folder) => {
+            const active = activeFilter === `folder:${folder.id}`;
+            const editing = editingFolderId === folder.id;
+            const folderName = getFolderDisplayName(folder, t);
+            const rowClassName = `group flex h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-[15px] transition ${
+              active ? 'border-l-2 border-[#2f7df6] bg-[#eaf2ff] text-[#2f7df6] shadow-[0_1px_2px_rgba(15,23,42,0.04)]' : 'text-[#374151] hover:bg-white/70'
+            }`;
+
+            if (editing) {
+              return (
+                <div
+                  key={folder.id}
+                  className={rowClassName}
+                  aria-current={active ? 'page' : undefined}
+                  data-testid={`folder-row-${folder.id}`}
+                  onContextMenu={(event) => onFolderContextMenu(event, folder)}
+                >
+                  {active ? <FolderOpen size={15} className="shrink-0" /> : <Folder size={15} className="shrink-0" />}
+                  <input
+                    value={editingFolderName}
+                    onChange={(event) => onEditingFolderNameChange(event.target.value)}
+                    onBlur={onCommitFolderRename}
+                    onFocus={(event) => event.target.select()}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onCommitFolderRename();
+                      }
+                      if (event.key === 'Escape') {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onCancelFolderRename();
+                      }
+                    }}
+                    autoFocus
+                    className={`min-w-0 flex-1 rounded border border-[#2f7df6] bg-white px-1.5 py-0.5 text-sm text-[#111827] outline-none ring-2 ring-[#2f7df6]/15 ${collapsed ? 'hidden' : ''}`}
+                    aria-label={t('folder.editName')}
+                    data-testid={`folder-rename-input-${folder.id}`}
+                  />
+                  <span className={`text-[13px] text-[#6b7280] ${collapsed ? 'hidden' : ''}`}>{folderCounts[folder.id] || 0}</span>
+                </div>
+              );
+            }
+
+            return (
+              <button
+                key={folder.id}
+                type="button"
+                onClick={() => onFilterChange(`folder:${folder.id}`)}
+                onContextMenu={(event) => onFolderContextMenu(event, folder)}
+                className={rowClassName}
+                aria-current={active ? 'page' : undefined}
+                data-testid={`folder-row-${folder.id}`}
+                title={collapsed ? folderName : undefined}
+              >
+                {active ? <FolderOpen size={15} className="shrink-0" /> : <Folder size={15} className="shrink-0" />}
+                <span className={`min-w-0 flex-1 truncate ${collapsed ? 'hidden' : ''}`}>{folderName}</span>
+                <span className={`text-[13px] text-[#6b7280] ${collapsed ? 'hidden' : ''}`}>{folderCounts[folder.id] || 0}</span>
+              </button>
+            );
+          })}
+          {customFolders.length === 0 && !collapsed ? <div className="rounded-lg px-3 py-2 text-[13px] text-[#9ca3af]">{t('sidebar.noFolders')}</div> : null}
+        </div>
+
+        <div className="mb-3 h-px bg-[#e2e5ea]" />
+
+        <div className="mb-2 flex items-center justify-between px-2 text-[13px] font-medium text-[#6b7280]">
+          <span className={collapsed ? 'hidden' : ''}>{t('sidebar.tags')}</span>
           <button
             type="button"
             onClick={onCreateTag}
             className="grid h-6 w-6 place-items-center rounded-md text-[#6b7280] transition hover:bg-white hover:text-[#111827]"
-            aria-label="新建标签"
-            title="新建标签"
+            aria-label={t('sidebar.newTag')}
+            title={t('sidebar.newTag')}
           >
             <Plus size={15} />
           </button>
@@ -358,87 +454,28 @@ export function Sidebar({
             >
               <span className="flex items-center gap-2">
                 <ChevronDown size={15} />
-                <span className={collapsed ? 'hidden' : ''}>{showAllTags ? '收起标签' : '更多标签'}</span>
+                <span className={collapsed ? 'hidden' : ''}>{showAllTags ? t('sidebar.collapseTags') : t('sidebar.moreTags')}</span>
               </span>
               <ChevronRight className={showAllTags ? 'rotate-90' : ''} size={15} />
             </button>
           ) : null}
         </div>
-
-        <div className="hidden">
-          {folders.map((folder) => {
-            const active = activeFilter === `folder:${folder.id}`;
-            const editing = editingFolderId === folder.id;
-            const folderName = getFolderDisplayName(folder, t);
-            const rowClassName = `group flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-sm transition ${
-              active ? 'bg-primary-50 text-primary-700' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-            }`;
-
-            if (editing) {
-              return (
-                <div
-                  key={folder.id}
-                  className={rowClassName}
-                  aria-current={active ? 'page' : undefined}
-                  data-testid={`folder-row-${folder.id}`}
-                  onContextMenu={(event) => onFolderContextMenu(event, folder)}
-                >
-                  {active ? <FolderOpen size={15} /> : <Folder size={15} />}
-                  <input
-                    value={editingFolderName}
-                    onChange={(event) => onEditingFolderNameChange(event.target.value)}
-                    onBlur={onCommitFolderRename}
-                    onFocus={(event) => event.target.select()}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        onCommitFolderRename();
-                      }
-                      if (event.key === 'Escape') {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        onCancelFolderRename();
-                      }
-                    }}
-                    autoFocus
-                    className="min-w-0 flex-1 rounded border border-[#2f7df6] bg-white px-1.5 py-0.5 text-sm text-[#111827] outline-none ring-2 ring-[#2f7df6]/15"
-                    aria-label={t('folder.editName')}
-                    data-testid={`folder-rename-input-${folder.id}`}
-                  />
-                  <span className="text-xs text-gray-400">{folderCounts[folder.id] || 0}</span>
-                </div>
-              );
-            }
-
-            return (
-              <button
-                key={folder.id}
-                type="button"
-                onClick={() => onFilterChange(`folder:${folder.id}`)}
-                onContextMenu={(event) => onFolderContextMenu(event, folder)}
-                className={rowClassName}
-                aria-current={active ? 'page' : undefined}
-                data-testid={`folder-row-${folder.id}`}
-              >
-                {active ? <FolderOpen size={15} /> : <Folder size={15} />}
-                <span className="min-w-0 flex-1 truncate">{folderName}</span>
-                <span className="text-xs text-gray-400">{folderCounts[folder.id] || 0}</span>
-              </button>
-            );
-          })}
-        </div>
       </div>
 
-      <div className="p-5">
-        <div className={`mb-4 rounded-xl border border-[#e4e7ed] bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] ${collapsed ? 'hidden' : ''}`}>
+      <div className="min-w-0 p-5">
+        <div className={`relative mb-4 rounded-xl border border-[#e4e7ed] bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] ${collapsed ? 'hidden' : ''}`}>
+          {syncPanelOpen ? (
+            <div className="absolute bottom-[calc(100%+10px)] left-0 right-0 z-50" onClick={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()}>
+              <SyncPanel sync={sync} />
+            </div>
+          ) : null}
           <div className="mb-3 flex items-center gap-3">
             <div className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-full bg-[radial-gradient(circle_at_50%_28%,#ffd8ad_0_24%,transparent_25%),radial-gradient(circle_at_40%_34%,#111827_0_4%,transparent_5%),radial-gradient(circle_at_60%_34%,#111827_0_4%,transparent_5%),linear-gradient(180deg,#e9f4ff_0_55%,#57a5ff_56%_100%)] text-sm font-semibold text-white shadow-inner">
               <span className="mt-5 h-5 w-8 rounded-t-full bg-[#1f2937]" aria-hidden="true" />
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <p className="truncate text-[16px] font-semibold text-[#111827]">{sync.session?.user.email || 'Local Workspace'}</p>
+                <p className="truncate text-[16px] font-semibold text-[#111827]">{sync.session?.user.email || t('sync.localWorkspace')}</p>
                 <span className="rounded-md bg-[#dce9ff] px-1.5 py-0.5 text-[11px] font-semibold text-[#2f7df6]">Pro</span>
               </div>
               <p className={`mt-1 flex items-center gap-1 text-[13px] ${syncClassName}`}>
@@ -446,12 +483,26 @@ export function Sidebar({
                 {syncLabel}
               </p>
             </div>
-            <button type="button" onClick={() => void sync.syncNow()} className="grid h-8 w-8 place-items-center rounded-lg text-[#6b7280] hover:bg-[#f3f4f6]" title="同步">
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                if (sync.session && !sync.error) {
+                  void sync.syncNow();
+                  return;
+                }
+                setSyncPanelOpen((value) => !value);
+              }}
+              className="grid h-8 w-8 place-items-center rounded-lg text-[#6b7280] hover:bg-[#f3f4f6] disabled:opacity-60"
+              title={sync.session ? t('sync.syncNow') : t('sync.signInTitle')}
+              aria-label={sync.session ? t('sync.syncNow') : t('sync.signInTitle')}
+              disabled={sync.loading || sync.syncing}
+            >
               <Cloud size={17} />
             </button>
           </div>
           <div className="mb-2 flex items-center justify-between text-[13px] text-[#6b7280]">
-            <span>空间使用</span>
+            <span>{t('sidebar.storageUsed')}</span>
             <span>{storageUsedLabel}</span>
           </div>
           <div className="h-2 overflow-hidden rounded-full bg-[#e5e7eb]">
@@ -467,8 +518,8 @@ export function Sidebar({
                 setSettingsOpen((value) => !value);
               }}
               className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white"
-              title="设置"
-              aria-label="设置"
+              title={t('sidebar.settings')}
+              aria-label={t('sidebar.settings')}
             >
               <Settings size={19} />
             </button>
@@ -476,11 +527,11 @@ export function Sidebar({
               <div className="absolute bottom-10 left-0 z-40 w-44 overflow-hidden rounded-lg border border-[#e5e7eb] bg-white py-1 text-sm shadow-[0_18px_45px_rgba(15,23,42,0.16)]">
                 <button type="button" onClick={onCreateNote} className="flex h-9 w-full items-center gap-2 px-3 text-left text-[#374151] hover:bg-[#f3f4f6]">
                   <Plus size={15} />
-                  新建笔记
+                  {t('sidebar.createNote')}
                 </button>
                 <button type="button" onClick={onCreateFolder} className="flex h-9 w-full items-center gap-2 px-3 text-left text-[#374151] hover:bg-[#f3f4f6]">
                   <Folder size={15} />
-                  新建文件夹
+                  {t('sidebar.newFolder')}
                 </button>
                 <button type="button" onClick={onImportClick} className="flex h-9 w-full items-center gap-2 px-3 text-left text-[#374151] hover:bg-[#f3f4f6]">
                   <Upload size={15} />
@@ -497,21 +548,21 @@ export function Sidebar({
             type="button"
             onClick={onToggleTheme}
             className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white"
-            title={darkMode ? '切换浅色模式' : '切换深色模式'}
-            aria-label={darkMode ? '切换浅色模式' : '切换深色模式'}
+            title={darkMode ? t('sidebar.lightMode') : t('sidebar.darkMode')}
+            aria-label={darkMode ? t('sidebar.lightMode') : t('sidebar.darkMode')}
           >
             <Sun size={19} />
           </button>
           <button
             type="button"
-            onClick={() => showNotice('帮助：⌘K 搜索，⌘N 新建，⌘S 保存')}
+            onClick={() => showNotice(t('sidebar.helpHint'))}
             className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white"
-            title="帮助"
-            aria-label="帮助"
+            title={t('sidebar.help')}
+            aria-label={t('sidebar.help')}
           >
             <HelpCircle size={19} />
           </button>
-          <button type="button" onClick={onTogglePanel} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white" title={collapsed ? '展开侧边栏' : '折叠侧边栏'} aria-label={collapsed ? '展开侧边栏' : '折叠侧边栏'}>
+          <button type="button" onClick={onTogglePanel} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white" title={collapsed ? t('sidebar.expandSidebar') : t('sidebar.collapseSidebar')} aria-label={collapsed ? t('sidebar.expandSidebar') : t('sidebar.collapseSidebar')}>
             {collapsed ? <ChevronRight size={19} /> : <ChevronLeft size={19} />}
           </button>
         </div>
