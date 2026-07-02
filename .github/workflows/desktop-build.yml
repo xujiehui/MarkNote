@@ -12,9 +12,28 @@ on:
       - main
       - master
   workflow_dispatch:
+    inputs:
+      target:
+        description: Desktop target to build
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - macos
+          - macos-x64
+          - macos-arm64
+          - windows-x64
 
 permissions:
   contents: read
+
+concurrency:
+  group: desktop-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22.12.0'
 
 jobs:
   quality:
@@ -27,7 +46,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '22.12.0'
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
       - name: Install dependencies
@@ -47,6 +66,7 @@ jobs:
       matrix:
         include:
           - name: macOS Intel
+            target: macos-x64
             os: macos-15-intel
             script: package:mac:x64
             artifact: marknote-macos-intel
@@ -56,6 +76,7 @@ jobs:
               release/*.blockmap
               release/latest-mac.yml
           - name: macOS Apple Silicon
+            target: macos-arm64
             os: macos-15
             script: package:mac:arm64
             artifact: marknote-macos-apple-silicon
@@ -65,6 +86,7 @@ jobs:
               release/*.blockmap
               release/latest-mac.yml
           - name: Windows x64
+            target: windows-x64
             os: windows-latest
             script: package:win:x64
             artifact: marknote-windows-x64
@@ -73,20 +95,26 @@ jobs:
               release/*.blockmap
               release/latest.yml
     runs-on: ${{ matrix.os }}
+    env:
+      SHOULD_BUILD: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.target == 'all' || github.event.inputs.target == matrix.target || (github.event.inputs.target == 'macos' && startsWith(matrix.target, 'macos-')) }}
     steps:
       - name: Checkout
+        if: env.SHOULD_BUILD == 'true'
         uses: actions/checkout@v4
 
       - name: Setup Node
+        if: env.SHOULD_BUILD == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: '22.12.0'
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
       - name: Install dependencies
+        if: env.SHOULD_BUILD == 'true'
         run: npm ci
 
       - name: Show runner environment
+        if: env.SHOULD_BUILD == 'true'
         shell: bash
         run: |
           node --version
@@ -95,9 +123,11 @@ jobs:
           node -p "process.platform + ' ' + process.arch"
 
       - name: Build renderer and Electron main process
+        if: env.SHOULD_BUILD == 'true'
         run: npm run desktop:build
 
       - name: Package desktop app
+        if: env.SHOULD_BUILD == 'true'
         run: npm run ${{ matrix.script }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
@@ -105,7 +135,7 @@ jobs:
           ELECTRON_CACHE: ${{ runner.temp }}/electron-cache
 
       - name: List package outputs
-        if: always()
+        if: always() && env.SHOULD_BUILD == 'true'
         shell: bash
         run: |
           pwd
@@ -113,9 +143,10 @@ jobs:
           find "$RUNNER_TEMP" -maxdepth 3 \( -name '*.zip' -o -name '*.dmg' -o -name '*.exe' \) -print 2>/dev/null || true
 
       - name: Upload package artifacts
+        if: env.SHOULD_BUILD == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.patterns }}
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30

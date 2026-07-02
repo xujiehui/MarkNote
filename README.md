@@ -79,8 +79,10 @@ npm run dist:win
 Current macOS outputs:
 
 - `release/mac/MarkNote.app`
-- `release/MarkNote-0.1.0.dmg`
-- `release/MarkNote-0.1.0-mac.zip`
+- `release/MarkNote-0.1.0-mac-x64.dmg`
+- `release/MarkNote-0.1.0-mac-x64.zip`
+- `release/MarkNote-0.1.0-mac-arm64.dmg`
+- `release/MarkNote-0.1.0-mac-arm64.zip`
 
 The local macOS build is unsigned because no valid Developer ID certificate is available in this environment. For public distribution, sign and notarize with an active Apple Developer ID certificate.
 
@@ -94,7 +96,7 @@ It runs on pushes, pull requests, version tags (`v*`), and manual workflow dispa
 - macOS Apple Silicon artifacts from `macos-15`
 - Windows x64 artifacts from `windows-latest`
 
-Artifacts are available from the workflow run page for 14 days.
+Artifacts are available from the workflow run page for 30 days.
 
 ### PWA Install
 
@@ -177,8 +179,10 @@ npm run dist:win
 当前 macOS 输出：
 
 - `release/mac/MarkNote.app`
-- `release/MarkNote-0.1.0.dmg`
-- `release/MarkNote-0.1.0-mac.zip`
+- `release/MarkNote-0.1.0-mac-x64.dmg`
+- `release/MarkNote-0.1.0-mac-x64.zip`
+- `release/MarkNote-0.1.0-mac-arm64.dmg`
+- `release/MarkNote-0.1.0-mac-arm64.zip`
 
 本地 macOS 构建未签名，因为当前环境没有可用的 Developer ID 证书。如需公开分发，请使用有效的 Apple Developer ID 证书进行签名和 notarize。
 
@@ -192,7 +196,7 @@ npm run dist:win
 - 来自 `macos-15` 的 macOS Apple Silicon 产物
 - 来自 `windows-latest` 的 Windows x64 产物
 
-构建产物会在 workflow run 页面保留 14 天。
+构建产物会在 workflow run 页面保留 30 天。
 
 ### PWA 安装
 
