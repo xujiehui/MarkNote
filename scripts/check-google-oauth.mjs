@@ -1,8 +1,12 @@
-/* global console, fetch, process, URL */
 
 import { lookup } from 'node:dns/promises';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import {
+  errorWithCauseMessage,
+  oauthEndpointReachabilityMessage,
+  supabaseProjectReachabilityMessage,
+} from './supabase-network-diagnostics.mjs';
 
 const env = {
   ...readEnvFile('.env'),
@@ -49,7 +53,7 @@ try {
     redirect: 'manual',
   });
 } catch (error) {
-  fail(`Could not reach Supabase Auth endpoint: ${errorMessage(error)}`);
+  fail(`Could not reach Supabase Auth endpoint. ${supabaseProjectReachabilityMessage(error)}`);
 }
 
 const location = response.headers.get('location') || '';
@@ -90,7 +94,7 @@ function readEnvFile(path) {
 }
 
 function errorMessage(error) {
-  return error instanceof Error ? error.message : String(error);
+  return errorWithCauseMessage(error);
 }
 
 function fail(message) {
@@ -105,6 +109,9 @@ async function assertGoogleAcceptsOAuthUrl(location) {
   } catch (error) {
     fail(`Supabase returned an invalid Google OAuth redirect URL: ${errorMessage(error)}`);
   }
+  if (/\/signin\/oauth\/error/i.test(googleUrl.pathname)) {
+    await failWithGoogleOAuthError(googleUrl);
+  }
 
   let googleResponse;
   try {
@@ -113,7 +120,7 @@ async function assertGoogleAcceptsOAuthUrl(location) {
       redirect: 'manual',
     });
   } catch (error) {
-    fail(`Could not reach Google OAuth endpoint: ${errorMessage(error)}`);
+    fail(`Could not reach Google OAuth endpoint. ${oauthEndpointReachabilityMessage('Google OAuth endpoint', error)}`);
   }
 
   const nextLocation = googleResponse.headers.get('location') || '';
@@ -145,7 +152,7 @@ async function failWithGoogleOAuthError(errorUrl) {
       redirect: 'follow',
     });
   } catch (error) {
-    fail(`Google OAuth rejected the configured client: ${errorMessage(error)}`);
+    fail(`Could not fetch Google OAuth error page. ${oauthEndpointReachabilityMessage('Google OAuth error page', error)}`);
   }
 
   const body = await response.text().catch(() => '');

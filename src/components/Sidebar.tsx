@@ -23,6 +23,7 @@ import {
 import { ARCHIVE_FOLDER_ID, CODE_FOLDER_ID, DEFAULT_FOLDER_ID } from '../lib/db';
 import { getFolderDisplayName, getTagDisplayName, useI18n } from '../i18n';
 import type { SyncSessionState } from '../sync/useSyncSession';
+import { isSyncCurrent, syncDisplayError } from '../sync/syncDisplayStatus';
 import type { Folder as NoteFolder, SearchResultGroups, WorkspaceFilter } from '../types';
 import { tagDotStyle } from '../lib/tags';
 import { SyncPanel } from './SyncPanel';
@@ -115,18 +116,32 @@ export function Sidebar({
   const tagItems = showAllTags ? tags : tags.slice(0, 5);
   const moreTags = Math.max(0, tags.length - 5);
   const customFolders = folders.filter((folder) => ![DEFAULT_FOLDER_ID, CODE_FOLDER_ID, ARCHIVE_FOLDER_ID].includes(folder.id));
+  const syncError = syncDisplayError(sync.error, sync.backendCheck, { includeBackendCheck: Boolean(sync.session) });
+  const syncCurrent = isSyncCurrent({
+    lastResultOk: Boolean(sync.lastResult?.ok),
+    queuePending: sync.queue.pending,
+    queueFailed: sync.queue.failed,
+  });
   const syncLabel = sync.syncing
     ? t('sync.syncing')
-    : sync.error
+    : sync.checkingBackend
+      ? t('sync.backendChecking')
+    : syncError
       ? t('sync.failed')
       : !sync.configured
         ? t('sync.localOnly')
         : sync.session
-          ? sync.lastResult?.ok
+          ? syncCurrent
             ? t('sync.synced')
             : t('sync.ready')
           : t('sync.signInRequired');
-  const syncClassName = sync.error ? 'text-[#ef4444]' : sync.syncing ? 'text-[#f59e0b]' : sync.configured && sync.session ? 'text-[#22c55e]' : 'text-[#6b7280]';
+  const syncClassName = syncError
+    ? 'text-[#ef4444]'
+    : sync.syncing || sync.checkingBackend
+      ? 'text-[#f59e0b]'
+      : sync.configured && sync.session
+        ? 'text-[#22c55e]'
+        : 'text-[#6b7280]';
   const hasSearchQuery = query.trim().length > 0;
   const showSearchPanel = !collapsed && (searchOpen || hasSearchQuery);
 
@@ -487,7 +502,7 @@ export function Sidebar({
               type="button"
               onClick={(event) => {
                 event.stopPropagation();
-                if (sync.session && !sync.error) {
+                if (sync.session && !syncError) {
                   void sync.syncNow();
                   return;
                 }
@@ -496,7 +511,7 @@ export function Sidebar({
               className="grid h-8 w-8 place-items-center rounded-lg text-[#6b7280] hover:bg-[#f3f4f6] disabled:opacity-60"
               title={sync.session ? t('sync.syncNow') : t('sync.signInTitle')}
               aria-label={sync.session ? t('sync.syncNow') : t('sync.signInTitle')}
-              disabled={sync.loading || sync.syncing}
+              disabled={sync.loading || sync.syncing || sync.checkingBackend}
             >
               <Cloud size={17} />
             </button>

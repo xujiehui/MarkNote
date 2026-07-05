@@ -5,8 +5,22 @@ import tseslint from '@typescript-eslint/eslint-plugin';
 import tsParser from '@typescript-eslint/parser';
 
 export default [
-  { ignores: ['dist', 'dist-electron', 'release', 'node_modules', '.tmp-tests'] },
+  { ignores: ['dist', 'dist-electron', 'release', 'node_modules', '.tmp-tests', 'index-*.js'] },
   js.configs.recommended,
+  {
+    files: ['scripts/**/*.mjs', 'tests/**/*.cjs'],
+    languageOptions: {
+      globals: {
+        Buffer: 'readonly',
+        URL: 'readonly',
+        console: 'readonly',
+        clearTimeout: 'readonly',
+        fetch: 'readonly',
+        process: 'readonly',
+        setTimeout: 'readonly',
+      },
+    },
+  },
   {
     files: ['**/*.{ts,tsx}'],
     languageOptions: {

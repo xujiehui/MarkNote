@@ -1,13 +1,39 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Folder, ImageAttachment, Note, SyncDevice } from '../types';
+import { ATTACHMENT_STORAGE_CANARY_CHECK_NAME, SYNC_TABLE_WRITES_CHECK_NAME } from './backendVerification';
 import { readSyncEnv } from './env';
-import type { AuthSession, OAuthProvider, PushPayload, RemoteSnapshot, RemoteSyncAdapter } from './types';
+import {
+  errorWithCauseMessage,
+  isSupabaseNameResolutionError,
+  isSupabaseStorageObjectMissingError,
+  supabaseBackendErrorMessage,
+  supabaseErrorCode,
+  supabaseProjectReachabilityMessage,
+} from './supabaseError';
+import type {
+  AuthSessionChangeHandler,
+  AuthSession,
+  OAuthProvider,
+  PushPayload,
+  RemoteSnapshot,
+  RemoteSyncAdapter,
+  SyncBackendCheckItem,
+  SyncBackendCheckResult,
+} from './types';
 
 const FOLDERS_TABLE = 'folders';
 const NOTES_TABLE = 'notes';
 const ATTACHMENTS_TABLE = 'attachments';
 const DEVICES_TABLE = 'devices';
+const PROFILES_TABLE = 'profiles';
 const ATTACHMENTS_BUCKET = 'attachments';
+const TABLE_CHECKS = [
+  { table: PROFILES_TABLE, label: 'Profiles table' },
+  { table: DEVICES_TABLE, label: 'Devices table' },
+  { table: FOLDERS_TABLE, label: 'Folders table' },
+  { table: NOTES_TABLE, label: 'Notes table' },
+  { table: ATTACHMENTS_TABLE, label: 'Attachments table' },
+];
 
 interface RemoteFolderRow {
   id: string;
@@ -64,7 +90,16 @@ export class SupabaseSyncAdapter implements RemoteSyncAdapter {
   constructor(url: string | undefined, publishableKey: string | undefined, client?: SupabaseClient) {
     this.url = url;
     this.configured = Boolean(url && publishableKey);
-    this.client = client ?? (this.configured && url && publishableKey ? createClient(url, publishableKey) : null);
+    this.client =
+      client ??
+      (this.configured && url && publishableKey
+        ? createClient(url, publishableKey, {
+            auth: {
+              detectSessionInUrl: false,
+              flowType: 'pkce',
+            },
+          })
+        : null);
   }
 
   async getSession(): Promise<AuthSession | null> {
@@ -79,13 +114,15 @@ export class SupabaseSyncAdapter implements RemoteSyncAdapter {
     if (!session?.user) {
       return null;
     }
-    return {
-      user: {
-        id: session.user.id,
-        email: session.user.email,
-      },
-      accessToken: session.access_token,
-    };
+    return sessionFromSupabaseSession(session);
+  }
+
+  onSessionChange(handler: AuthSessionChangeHandler): () => void {
+    const client = this.requireClient();
+    const { data } = client.auth.onAuthStateChange((event, session) => {
+      handler(session?.user ? sessionFromSupabaseSession(session) : null, event);
+    });
+    return () => data.subscription.unsubscribe();
   }
 
   async signInWithOAuth(provider: OAuthProvider): Promise<void> {
@@ -146,6 +183,68 @@ export class SupabaseSyncAdapter implements RemoteSyncAdapter {
     }
   }
 
+  async checkBackend(): Promise<SyncBackendCheckResult> {
+    const checkedAt = Date.now();
+    if (!this.configured || !this.client) {
+      return {
+        ok: false,
+        checkedAt,
+        items: [
+          checkItem(
+            'Supabase configuration',
+            'error',
+            'Supabase sync is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.',
+          ),
+        ],
+      };
+    }
+
+    const client = this.requireClient();
+    const items: SyncBackendCheckItem[] = [await checkProjectHealth(this.url)];
+    let session: AuthSession | null = null;
+    try {
+      session = await this.getSession();
+    } catch (error) {
+      items.push(checkItem('Auth session', 'error', errorMessage(error)));
+      return checkResult(checkedAt, items);
+    }
+
+    if (!session) {
+      items.push(
+        checkItem(
+          'Auth session',
+          'warning',
+          'Sign in before checking sync tables. MarkNote sync tables are intentionally not exposed to anonymous clients.',
+        ),
+      );
+      return checkResult(checkedAt, items);
+    }
+
+    items.push(checkItem('Auth session', 'ok', 'Signed-in session is available for backend checks.'));
+    let tablesReachable = true;
+    for (const { table, label } of TABLE_CHECKS) {
+      const { error } = await client.from(table).select('id').limit(1);
+      if (error) {
+        tablesReachable = false;
+        items.push(checkItem(label, 'error', supabaseBackendErrorMessage(error, label), supabaseErrorCode(error)));
+      } else {
+        items.push(checkItem(label, 'ok', `${label} is reachable for the signed-in user.`));
+      }
+    }
+    if (!tablesReachable) {
+      return checkResult(checkedAt, items);
+    }
+
+    const tableWriteCheck = await checkSyncTableWrites(client, session.user.id);
+    items.push(tableWriteCheck);
+    if (tableWriteCheck.status === 'error') {
+      return checkResult(checkedAt, items);
+    }
+    items.push(...(await checkAttachmentStorage(client, session.user.id)));
+
+    return checkResult(checkedAt, items);
+  }
+
   async registerDevice(device: SyncDevice): Promise<void> {
     const client = this.requireClient();
     const session = await this.getSession();
@@ -159,9 +258,9 @@ export class SupabaseSyncAdapter implements RemoteSyncAdapter {
       platform: device.provider,
       last_seen_at: toIso(device.lastSeenAt),
     };
-    const { error } = await client.from(DEVICES_TABLE).upsert(row);
+    const { error } = await client.from(DEVICES_TABLE).upsert(row, { onConflict: 'user_id,id' });
     if (error) {
-      throw new Error(error.message);
+      throw supabaseSyncError(error, 'Could not register this device');
     }
   }
 
@@ -175,13 +274,13 @@ export class SupabaseSyncAdapter implements RemoteSyncAdapter {
     ]);
 
     if (folders.error) {
-      throw new Error(folders.error.message);
+      throw supabaseSyncError(folders.error, 'Could not pull folders');
     }
     if (notes.error) {
-      throw new Error(notes.error.message);
+      throw supabaseSyncError(notes.error, 'Could not pull notes');
     }
     if (attachments.error) {
-      throw new Error(attachments.error.message);
+      throw supabaseSyncError(attachments.error, 'Could not pull attachments');
     }
 
     return {
@@ -200,40 +299,43 @@ export class SupabaseSyncAdapter implements RemoteSyncAdapter {
     }
 
     const userId = session.user.id;
+    const missingStoragePath = payload.attachments.find((attachment) => !attachment.storagePath);
+    if (missingStoragePath) {
+      throw new Error(`Could not push attachments: Attachment storage path is missing for ${missingStoragePath.id}.`);
+    }
+
     const folderRows = payload.folders.map((folder) => folderToRow(folder, userId));
     const noteRows = payload.notes.map((note) => noteToRow(note, userId));
-    const attachmentRows = payload.attachments
-      .filter((attachment) => attachment.storagePath)
-      .map((attachment) => attachmentToRow(attachment, userId));
+    const attachmentRows = payload.attachments.map((attachment) => attachmentToRow(attachment, userId));
 
     if (folderRows.length) {
-      const { error } = await client.from(FOLDERS_TABLE).upsert(folderRows);
+      const { error } = await client.from(FOLDERS_TABLE).upsert(folderRows, { onConflict: 'user_id,id' });
       if (error) {
-        throw new Error(error.message);
+        throw supabaseSyncError(error, 'Could not push folders');
       }
     }
     if (noteRows.length) {
-      const { error } = await client.from(NOTES_TABLE).upsert(noteRows);
+      const { error } = await client.from(NOTES_TABLE).upsert(noteRows, { onConflict: 'user_id,id' });
       if (error) {
-        throw new Error(error.message);
+        throw supabaseSyncError(error, 'Could not push notes');
       }
     }
     if (attachmentRows.length) {
-      const { error } = await client.from(ATTACHMENTS_TABLE).upsert(attachmentRows);
+      const { error } = await client.from(ATTACHMENTS_TABLE).upsert(attachmentRows, { onConflict: 'user_id,id' });
       if (error) {
-        throw new Error(error.message);
+        throw supabaseSyncError(error, 'Could not push attachments');
       }
     }
 
     const deletedAt = new Date().toISOString();
     await Promise.all([
-      ...payload.deleted.folders.map((id) => softDeleteRemote(client, FOLDERS_TABLE, id, deletedAt)),
-      ...payload.deleted.notes.map((id) => softDeleteRemote(client, NOTES_TABLE, id, deletedAt)),
-      ...payload.deleted.attachments.map((id) => softDeleteRemote(client, ATTACHMENTS_TABLE, id, deletedAt)),
+      ...payload.deleted.folders.map((id) => softDeleteRemote(client, FOLDERS_TABLE, id, deletedAt, userId)),
+      ...payload.deleted.notes.map((id) => softDeleteRemote(client, NOTES_TABLE, id, deletedAt, userId)),
+      ...payload.deleted.attachments.map((attachment) => softDeleteAttachmentRemote(client, attachment, deletedAt, userId)),
     ]).then((results) => {
       const failed = results.find((result) => result.error);
       if (failed?.error) {
-        throw new Error(failed.error.message);
+        throw supabaseSyncError(failed.error, 'Could not push deletes');
       }
     });
 
@@ -253,9 +355,24 @@ export class SupabaseSyncAdapter implements RemoteSyncAdapter {
       upsert: true,
     });
     if (error) {
-      throw new Error(error.message);
+      throw supabaseSyncError(error, 'Could not upload attachment');
     }
     return { storagePath };
+  }
+
+  async downloadAttachment(attachment: ImageAttachment): Promise<{ data: string }> {
+    const client = this.requireClient();
+    if (!attachment.storagePath) {
+      throw new Error('Attachment storage path is missing.');
+    }
+    const { data, error } = await client.storage.from(ATTACHMENTS_BUCKET).download(attachment.storagePath);
+    if (error) {
+      throw supabaseSyncError(error, 'Could not download attachment');
+    }
+    if (!data) {
+      throw new Error('Could not download attachment: Storage returned no data.');
+    }
+    return { data: await blobToDataUrl(data, attachment.mimeType) };
   }
 
   private requireClient(): SupabaseClient {
@@ -366,6 +483,16 @@ function fromIso(value: string): number {
   return new Date(value).getTime();
 }
 
+function sessionFromSupabaseSession(session: { access_token?: string; user: { id: string; email?: string } }): AuthSession {
+  return {
+    user: {
+      id: session.user.id,
+      email: session.user.email,
+    },
+    accessToken: session.access_token,
+  };
+}
+
 function dataUrlToBlob(dataUrl: string, mimeType: string): Blob {
   const [, encoded = ''] = dataUrl.split(',');
   const binary = atob(encoded);
@@ -374,6 +501,15 @@ function dataUrlToBlob(dataUrl: string, mimeType: string): Blob {
     bytes[index] = binary.charCodeAt(index);
   }
   return new Blob([bytes], { type: mimeType });
+}
+
+async function blobToDataUrl(blob: Blob, fallbackMimeType: string): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = '';
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return `data:${blob.type || fallbackMimeType};base64,${btoa(binary)}`;
 }
 
 async function assertSupabaseProjectReachable(url: string | undefined): Promise<void> {
@@ -396,19 +532,244 @@ async function assertSupabaseProjectReachable(url: string | undefined): Promise<
       cache: 'no-store',
     });
   } catch (error) {
-    if (isNameResolutionError(error)) {
+    if (isSupabaseNameResolutionError(error)) {
       throw new Error('Supabase project URL cannot be resolved. Check VITE_SUPABASE_URL points to an active project.');
     }
   }
 }
 
-function isNameResolutionError(error: unknown): boolean {
-  const message = errorMessage(error).toLowerCase();
-  return message.includes('enotfound') || message.includes('could not resolve') || message.includes('name_not_resolved');
+async function checkProjectHealth(url: string | undefined): Promise<SyncBackendCheckItem> {
+  if (!url) {
+    return checkItem('Supabase project', 'error', 'Supabase project URL is missing.');
+  }
+  let healthUrl: URL;
+  try {
+    healthUrl = new URL('/auth/v1/health', url);
+  } catch {
+    return checkItem('Supabase project', 'error', 'Supabase project URL is invalid.');
+  }
+  if (!healthUrl.hostname.endsWith('.supabase.co')) {
+    return checkItem('Supabase project', 'ok', 'Custom Supabase URL is configured.');
+  }
+  try {
+    await fetch(healthUrl, {
+      method: 'HEAD',
+      mode: 'no-cors',
+      cache: 'no-store',
+    });
+    return checkItem('Supabase project', 'ok', 'Supabase project is reachable.');
+  } catch (error) {
+    const message = isSupabaseNameResolutionError(error)
+      ? 'Supabase project URL cannot be resolved. Check VITE_SUPABASE_URL points to an active project.'
+      : supabaseProjectReachabilityMessage(error);
+    return checkItem('Supabase project', 'error', message);
+  }
+}
+
+async function checkAttachmentStorage(client: SupabaseClient, userId: string): Promise<SyncBackendCheckItem[]> {
+  const bucket = client.storage.from(ATTACHMENTS_BUCKET);
+  const { error: listError } = await bucket.list(userId, { limit: 1 });
+  if (listError) {
+    return [
+      checkItem(
+        'Attachments bucket',
+        'error',
+        supabaseBackendErrorMessage(listError, 'Attachments bucket'),
+        supabaseErrorCode(listError),
+      ),
+    ];
+  }
+
+  return [
+    checkItem('Attachments bucket', 'ok', 'Attachments bucket is reachable for the signed-in user.'),
+    await checkAttachmentStorageCanary(client, userId),
+  ];
+}
+
+async function checkSyncTableWrites(client: SupabaseClient, userId: string): Promise<SyncBackendCheckItem> {
+  const now = new Date().toISOString();
+  const suffix = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const folderId = `marknote-diagnostic-folder-${suffix}`;
+  const noteId = `marknote-diagnostic-note-${suffix}`;
+  const attachmentId = `marknote-diagnostic-attachment-${suffix}`;
+  const storagePath = `${userId}/.marknote-diagnostics/${attachmentId}.txt`;
+  const cleanup = async () => {
+    const attachmentDelete = await client.from(ATTACHMENTS_TABLE).delete().eq('user_id', userId).eq('id', attachmentId);
+    const noteDelete = await client.from(NOTES_TABLE).delete().eq('user_id', userId).eq('id', noteId);
+    const folderDelete = await client.from(FOLDERS_TABLE).delete().eq('user_id', userId).eq('id', folderId);
+    return [
+      { resource: 'Sync table attachment delete', error: attachmentDelete.error },
+      { resource: 'Sync table note delete', error: noteDelete.error },
+      { resource: 'Sync table folder delete', error: folderDelete.error },
+    ];
+  };
+
+  try {
+    const folderInsert = await client.from(FOLDERS_TABLE).insert({
+      id: folderId,
+      user_id: userId,
+      name: 'MarkNote diagnostic folder',
+      sort_order: 0,
+      created_at: now,
+      updated_at: now,
+      version: 1,
+    });
+    if (folderInsert.error) {
+      return syncTableWriteError(folderInsert.error, 'Sync table folder insert');
+    }
+
+    const noteInsert = await client.from(NOTES_TABLE).insert({
+      id: noteId,
+      user_id: userId,
+      folder_id: folderId,
+      title: 'MarkNote diagnostic note',
+      content: '<p>diagnostic</p>',
+      raw_content: 'diagnostic',
+      tags: [],
+      pinned: false,
+      created_at: now,
+      updated_at: now,
+      version: 1,
+    });
+    if (noteInsert.error) {
+      return syncTableWriteError(noteInsert.error, 'Sync table note insert');
+    }
+
+    const attachmentInsert = await client.from(ATTACHMENTS_TABLE).insert({
+      id: attachmentId,
+      user_id: userId,
+      note_id: noteId,
+      storage_path: storagePath,
+      mime_type: 'text/plain',
+      size_bytes: 0,
+      created_at: now,
+      updated_at: now,
+    });
+    if (attachmentInsert.error) {
+      return syncTableWriteError(attachmentInsert.error, 'Sync table attachment insert');
+    }
+
+    const noteUpdate = await client
+      .from(NOTES_TABLE)
+      .update({
+        title: 'MarkNote diagnostic note updated',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('user_id', userId)
+      .eq('id', noteId);
+    if (noteUpdate.error) {
+      return syncTableWriteError(noteUpdate.error, 'Sync table note update');
+    }
+
+    const cleanupResults = await cleanup();
+    const cleanupFailure = cleanupResults.find((result) => result.error);
+    if (cleanupFailure) {
+      return syncTableWriteError(cleanupFailure.error, cleanupFailure.resource);
+    }
+    const leftover = await findDiagnosticRowLeftover(client, userId, [
+      { table: ATTACHMENTS_TABLE, id: attachmentId, resource: 'Sync table attachment delete' },
+      { table: NOTES_TABLE, id: noteId, resource: 'Sync table note delete' },
+      { table: FOLDERS_TABLE, id: folderId, resource: 'Sync table folder delete' },
+    ]);
+    if (leftover) {
+      return checkItem(leftover.resource, 'error', `${leftover.resource} returned success, but the diagnostic row is still visible.`);
+    }
+    return checkItem(
+      SYNC_TABLE_WRITES_CHECK_NAME,
+      'ok',
+      'Sync tables can insert, update, and delete folder, note, and attachment rows for the signed-in user.',
+    );
+  } finally {
+    await cleanup().catch(() => undefined);
+  }
+}
+
+async function findDiagnosticRowLeftover(
+  client: SupabaseClient,
+  userId: string,
+  rows: Array<{ table: string; id: string; resource: string }>,
+): Promise<{ resource: string } | null> {
+  for (const row of rows) {
+    const { data, error } = await client
+      .from(row.table)
+      .select('id')
+      .eq('user_id', userId)
+      .eq('id', row.id)
+      .limit(1);
+    if (error) {
+      return { resource: row.resource };
+    }
+    if (Array.isArray(data) && data.length > 0) {
+      return { resource: row.resource };
+    }
+  }
+  return null;
+}
+
+function syncTableWriteError(error: unknown, resource: string): SyncBackendCheckItem {
+  return checkItem(resource, 'error', supabaseBackendErrorMessage(error, resource), supabaseErrorCode(error));
+}
+
+async function checkAttachmentStorageCanary(client: SupabaseClient, userId: string): Promise<SyncBackendCheckItem> {
+  const bucket = client.storage.from(ATTACHMENTS_BUCKET);
+  const path = `${userId}/.marknote-diagnostics/storage-canary-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`;
+  let shouldCleanup = false;
+
+  try {
+    const firstUpload = await bucket.upload(path, new Blob(['marknote storage diagnostic v1'], { type: 'text/plain' }), {
+      contentType: 'text/plain',
+      upsert: false,
+    });
+    if (firstUpload.error) {
+      return storageCanaryError(firstUpload.error, 'Attachment storage upload');
+    }
+    shouldCleanup = true;
+
+    const overwrite = await bucket.upload(path, new Blob(['marknote storage diagnostic v2'], { type: 'text/plain' }), {
+      contentType: 'text/plain',
+      upsert: true,
+    });
+    if (overwrite.error) {
+      return storageCanaryError(overwrite.error, 'Attachment storage overwrite');
+    }
+
+    const download = await bucket.download(path);
+    if (download.error || !download.data) {
+      return storageCanaryError(download.error || new Error('Storage returned no data.'), 'Attachment storage download');
+    }
+
+    const remove = await bucket.remove([path]);
+    if (remove.error) {
+      return storageCanaryError(remove.error, 'Attachment storage delete');
+    }
+
+    const deletedDownload = await bucket.download(path);
+    if (!deletedDownload.error && deletedDownload.data) {
+      return storageCanaryError(
+        new Error('Diagnostic object is still downloadable after delete.'),
+        'Attachment storage delete',
+      );
+    }
+    shouldCleanup = false;
+
+    return checkItem(
+      ATTACHMENT_STORAGE_CANARY_CHECK_NAME,
+      'ok',
+      'Attachment storage can upload, overwrite, download, and delete files for the signed-in user.',
+    );
+  } finally {
+    if (shouldCleanup) {
+      await bucket.remove([path]).catch(() => undefined);
+    }
+  }
+}
+
+function storageCanaryError(error: unknown, resource: string): SyncBackendCheckItem {
+  return checkItem(resource, 'error', supabaseBackendErrorMessage(error, resource), supabaseErrorCode(error));
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return errorWithCauseMessage(error);
 }
 
 function oauthRedirectUrl(): string | undefined {
@@ -431,12 +792,61 @@ function oauthRedirectUrl(): string | undefined {
   return url.toString();
 }
 
-async function softDeleteRemote(client: SupabaseClient, table: string, id: string, deletedAt: string) {
+async function softDeleteRemote(client: SupabaseClient, table: string, id: string, deletedAt: string, userId: string) {
   return client
     .from(table)
     .update({
       deleted_at: deletedAt,
       updated_at: deletedAt,
     })
+    .eq('user_id', userId)
     .eq('id', id);
+}
+
+async function softDeleteAttachmentRemote(
+  client: SupabaseClient,
+  attachment: string | ImageAttachment,
+  deletedAt: string,
+  userId: string,
+) {
+  const id = typeof attachment === 'string' ? attachment : attachment.id;
+  const storagePath = typeof attachment === 'string' ? '' : attachment.storagePath;
+  if (storagePath) {
+    const { error } = await client.storage.from(ATTACHMENTS_BUCKET).remove([storagePath]);
+    if (error && !isSupabaseStorageObjectMissingError(error)) {
+      return { data: null, error };
+    }
+  }
+  return softDeleteRemote(client, ATTACHMENTS_TABLE, id, deletedAt, userId);
+}
+
+function checkItem(
+  name: string,
+  status: SyncBackendCheckItem['status'],
+  message: string,
+  code?: string,
+): SyncBackendCheckItem {
+  return {
+    name,
+    status,
+    message,
+    code,
+  };
+}
+
+function checkResult(checkedAt: number, items: SyncBackendCheckItem[]): SyncBackendCheckResult {
+  return {
+    ok: items.every((item) => item.status === 'ok'),
+    checkedAt,
+    items,
+  };
+}
+
+function supabaseSyncError(error: unknown, fallback: string): Error {
+  const code = supabaseErrorCode(error);
+  const next = new Error(`${fallback}: ${supabaseBackendErrorMessage(error, fallback)}`);
+  if (code) {
+    (next as Error & { code?: string }).code = code;
+  }
+  return next;
 }

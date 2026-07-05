@@ -14,6 +14,17 @@ export interface AuthSession {
 
 export type OAuthProvider = 'google' | 'github';
 
+export type AuthSessionChangeEvent =
+  | 'INITIAL_SESSION'
+  | 'SIGNED_IN'
+  | 'SIGNED_OUT'
+  | 'PASSWORD_RECOVERY'
+  | 'TOKEN_REFRESHED'
+  | 'USER_UPDATED'
+  | string;
+
+export type AuthSessionChangeHandler = (session: AuthSession | null, event: AuthSessionChangeEvent) => void;
+
 export interface RemoteSnapshot {
   folders: Folder[];
   notes: Note[];
@@ -28,7 +39,7 @@ export interface PushPayload {
   deleted: {
     folders: string[];
     notes: string[];
-    attachments: string[];
+    attachments: Array<string | ImageAttachment>;
   };
 }
 
@@ -36,6 +47,8 @@ export interface RemoteSyncAdapter {
   readonly id: SyncProviderId;
   readonly name: string;
   readonly configured: boolean;
+  checkBackend?(): Promise<SyncBackendCheckResult>;
+  onSessionChange?(handler: AuthSessionChangeHandler): () => void;
   getSession(): Promise<AuthSession | null>;
   signInWithOAuth(provider: OAuthProvider): Promise<void>;
   completeOAuthSignIn(callbackUrl: string): Promise<AuthSession | null>;
@@ -44,6 +57,22 @@ export interface RemoteSyncAdapter {
   pull(lastPulledAt: number): Promise<RemoteSnapshot>;
   push(payload: PushPayload): Promise<{ syncedAt: number }>;
   uploadAttachment?(attachment: ImageAttachment): Promise<{ storagePath: string; publicUrl?: string }>;
+  downloadAttachment?(attachment: ImageAttachment): Promise<{ data: string }>;
+}
+
+export type SyncBackendCheckStatus = 'ok' | 'warning' | 'error';
+
+export interface SyncBackendCheckItem {
+  name: string;
+  status: SyncBackendCheckStatus;
+  message: string;
+  code?: string;
+}
+
+export interface SyncBackendCheckResult {
+  ok: boolean;
+  checkedAt: number;
+  items: SyncBackendCheckItem[];
 }
 
 export interface SyncResult {

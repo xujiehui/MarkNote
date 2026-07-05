@@ -1,14 +1,14 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DEEP_LINK_PROTOCOL, createAuthCallbackState, findAuthCallbackUrl, isAuthCallbackUrl } from './authCallbackState.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
-const DEEP_LINK_PROTOCOL = 'marknote';
 
 let mainWindow: BrowserWindow | null = null;
-let pendingAuthCallbackUrl: string | null = null;
+const authCallbackState = createAuthCallbackState(findAuthCallbackUrl(process.argv));
 
 if (process.defaultApp && process.argv.length >= 2) {
   app.setAsDefaultProtocolClient(DEEP_LINK_PROTOCOL, process.execPath, [path.resolve(process.argv[1])]);
@@ -37,10 +37,6 @@ function createWindow() {
 
   window.once('ready-to-show', () => {
     window.show();
-    if (pendingAuthCallbackUrl) {
-      sendAuthCallbackToRenderer(pendingAuthCallbackUrl);
-      pendingAuthCallbackUrl = null;
-    }
   });
 
   window.on('closed', () => {
@@ -101,6 +97,12 @@ app.on('open-url', (event, url) => {
   handleAuthCallbackUrl(url);
 });
 
+ipcMain.handle('marknote:get-auth-callback', async () => authCallbackState.peek());
+
+ipcMain.handle('marknote:clear-auth-callback', async (_event, url: string) => {
+  authCallbackState.clear(url);
+});
+
 ipcMain.handle('marknote:open-external', async (_event, url: string) => {
   if (!url.startsWith('https://')) {
     throw new Error('Only HTTPS URLs can be opened externally.');
@@ -115,11 +117,11 @@ app.on('window-all-closed', () => {
 });
 
 function handleAuthCallbackUrl(url: string) {
-  if (!url.startsWith(`${DEEP_LINK_PROTOCOL}://auth/callback`)) {
+  if (!isAuthCallbackUrl(url)) {
     return;
   }
+  authCallbackState.setPending(url);
   if (!mainWindow) {
-    pendingAuthCallbackUrl = url;
     return;
   }
   sendAuthCallbackToRenderer(url);
@@ -127,7 +129,7 @@ function handleAuthCallbackUrl(url: string) {
 
 function sendAuthCallbackToRenderer(url: string) {
   if (!mainWindow) {
-    pendingAuthCallbackUrl = url;
+    authCallbackState.setPending(url);
     return;
   }
   mainWindow.webContents.send('marknote:auth-callback', url);

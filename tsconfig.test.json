@@ -9,5 +9,5 @@
     "outDir": ".tmp-tests",
     "types": ["node", "jsdom"]
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts"]
+  "include": ["electron/authCallbackState.ts", "src/**/*.ts", "tests/**/*.ts", "tests/**/*.tsx"]
 }

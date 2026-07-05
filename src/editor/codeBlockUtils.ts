@@ -51,7 +51,7 @@ export function highlightCodeBlocks(root: ParentNode = document): void {
       pre.setAttribute('data-code-label', codeLanguageLabel(language || 'javascript'));
       updateLineNumbers(pre, element);
     }
-    if (element.dataset.highlighted === 'yes') {
+    if (isInsideEditableSurface(element) || element.dataset.highlighted === 'yes') {
       return;
     }
     hljs.highlightElement(element);
@@ -69,4 +69,8 @@ function updateLineNumbers(pre: Element, code: HTMLElement): void {
     'data-line-numbers',
     Array.from({ length: lines }, (_value, index) => String(index + 1)).join('\n'),
   );
+}
+
+function isInsideEditableSurface(element: HTMLElement): boolean {
+  return Boolean(element.closest('[contenteditable="true"]'));
 }

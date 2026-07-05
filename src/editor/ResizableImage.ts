@@ -7,6 +7,7 @@ export interface ImageAttrs {
   title?: string;
   width?: string;
   align?: 'left' | 'right' | 'center';
+  attachmentId?: string;
 }
 
 declare module '@tiptap/core' {
@@ -39,6 +40,16 @@ export const ResizableImage = Image.extend({
           'data-align': attributes.align,
           class: `image-${attributes.align}`,
         }),
+      },
+      attachmentId: {
+        default: null,
+        parseHTML: (element) => element.getAttribute('data-attachment-id'),
+        renderHTML: (attributes) =>
+          attributes.attachmentId
+            ? {
+                'data-attachment-id': attributes.attachmentId,
+              }
+            : {},
       },
     };
   },

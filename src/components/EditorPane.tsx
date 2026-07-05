@@ -4,6 +4,8 @@ import { Mark, Node as TiptapNode, mergeAttributes } from '@tiptap/core';
 import { NodeSelection } from '@tiptap/pm/state';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
+import TaskItem from '@tiptap/extension-task-item';
+import TaskList from '@tiptap/extension-task-list';
 import {
   AlignCenter,
   AlignLeft,
@@ -49,17 +51,30 @@ import {
   Wand2,
 } from 'lucide-react';
 import type { Note, SharePermission, ShareSettings, ShareType } from '../types';
-import { fileToBase64Image } from '../lib/image';
+import { createImageAttachment, updateImageAttachment } from '../lib/db';
+import { dataUrlMimeType, dataUrlSizeBytes, fileToBase64Image } from '../lib/image';
 import { formatFullDate, formatUpdatedAt } from '../lib/date';
+import { focusCodeBlockAtPoint } from '../editor/codeBlockFocus';
+import { focusEditorEndFromCanvasClick } from '../editor/editorCanvasFocus';
 import { CODE_LANGUAGES, codeLanguageLabel, highlightCodeBlocks } from '../editor/codeBlockUtils';
 import { ResizableImage } from '../editor/ResizableImage';
 import { getTagDisplayName, useI18n } from '../i18n';
 import { IconButton } from './IconButton';
 import { tagPillStyle } from '../lib/tags';
+import type { LocalSaveState } from '../lib/editorStatus';
+import { EditorSyncStatus } from './EditorSyncStatus';
 
 interface EditorPaneProps {
   note?: Note;
-  saveState: 'idle' | 'saving' | 'saved';
+  saveState: LocalSaveState;
+  syncConfigured: boolean;
+  syncSessionActive: boolean;
+  syncSyncing: boolean;
+  syncCheckingBackend: boolean;
+  syncError: string;
+  syncLastResultOk: boolean;
+  syncQueuePending: number;
+  syncQueueFailed: number;
   snapshots: NoteSnapshot[];
   shareSettings?: ShareSettings;
   tags: string[];
@@ -67,6 +82,8 @@ interface EditorPaneProps {
   onTitleChange: (title: string) => void;
   onContentChange: (content: string) => void;
   onManualSave: () => void;
+  onSyncRetry: () => void;
+  onSyncDiagnose: () => void;
   onToggleTag: (tag: string) => void;
   onTogglePin: () => void;
   onDeleteNote: () => void;
@@ -83,6 +100,7 @@ export interface NoteSnapshot {
 
 interface ImageBubble {
   src: string;
+  attachmentId?: string;
   x: number;
   y: number;
   imageX: number;
@@ -93,6 +111,7 @@ interface ImageBubble {
 
 interface ImageMenu {
   src: string;
+  attachmentId?: string;
   x: number;
   y: number;
 }
@@ -105,9 +124,19 @@ interface CodeCopyOverlay {
   collapsed: boolean;
 }
 
+const TASK_LIST_TEMPLATE = '<ul data-type="taskList"><li data-type="taskItem" data-checked="false"><p>Todo</p></li></ul>';
+
 export function EditorPane({
   note,
   saveState,
+  syncConfigured,
+  syncSessionActive,
+  syncSyncing,
+  syncCheckingBackend,
+  syncError,
+  syncLastResultOk,
+  syncQueuePending,
+  syncQueueFailed,
   snapshots,
   shareSettings,
   tags,
@@ -115,6 +144,8 @@ export function EditorPane({
   onTitleChange,
   onContentChange,
   onManualSave,
+  onSyncRetry,
+  onSyncDiagnose,
   onToggleTag,
   onTogglePin,
   onDeleteNote,
@@ -159,6 +190,10 @@ export function EditorPane({
       Placeholder.configure({
         placeholder: t('editor.placeholder'),
       }),
+      TaskList,
+      TaskItem.configure({
+        nested: true,
+      }),
       UnderlineMark,
       VideoNode,
       AudioNode,
@@ -177,6 +212,9 @@ export function EditorPane({
     editorProps: {
       attributes: {
         class: 'prose-editor',
+      },
+      handleDOMEvents: {
+        mousedown: focusCodeBlockAtPoint,
       },
     },
     onUpdate: ({ editor: currentEditor }) => {
@@ -202,7 +240,17 @@ export function EditorPane({
       setImageUploadProgress(5);
       for (const [index, file] of files.entries()) {
         const src = await fileToBase64Image(file);
-        editor.chain().focus().setImage({ src, alt: file.name, width: '50%', align: 'left' } as never).run();
+        const attachment = await createImageAttachment({
+          noteId: note.id,
+          data: src,
+          mimeType: dataUrlMimeType(src),
+          sizeBytes: dataUrlSizeBytes(src),
+        });
+        editor
+          .chain()
+          .focus()
+          .setImage({ src, alt: file.name, width: '50%', align: 'left', attachmentId: attachment.id } as never)
+          .run();
         setImageUploadProgress(Math.round(((index + 1) / files.length) * 100));
       }
       window.setTimeout(() => setImageUploadProgress(null), 650);
@@ -224,6 +272,7 @@ export function EditorPane({
     const rect = selected.getBoundingClientRect();
     setImageBubble({
       src,
+      attachmentId: selected.getAttribute('data-attachment-id') || undefined,
       x: Math.min(rect.left + rect.width - 212, window.innerWidth - 232),
       y: Math.max(rect.top - 44, 76),
       imageX: rect.left,
@@ -323,6 +372,7 @@ export function EditorPane({
       updateImageOverlay(image.src);
       setImageMenu({
         src: image.src,
+        attachmentId: image.getAttribute('data-attachment-id') || undefined,
         x: Math.min(event.clientX, window.innerWidth - 210),
         y: Math.min(event.clientY, window.innerHeight - 238),
       });
@@ -400,22 +450,29 @@ export function EditorPane({
   }
 
   async function insertMediaFile(file: File, kind: 'video' | 'audio' | 'file') {
-    if (!editor) {
+    if (!editor || !note) {
       return;
     }
     const dataUrl = await readFileAsDataUrl(file);
+    const attachment = await createImageAttachment({
+      noteId: note.id,
+      data: dataUrl,
+      mimeType: file.type || dataUrlMimeType(dataUrl),
+      sizeBytes: file.size || dataUrlSizeBytes(dataUrl),
+    });
     const safeName = escapeHtml(file.name);
+    const attachmentAttr = ` data-attachment-id="${escapeHtml(attachment.id)}"`;
     if (kind === 'video') {
-      editor.chain().focus().insertContent(`<video controls src="${dataUrl}" title="${safeName}"></video><p></p>`).run();
+      editor.chain().focus().insertContent(`<video controls src="${dataUrl}" title="${safeName}"${attachmentAttr}></video><p></p>`).run();
       showToast('视频已插入');
       return;
     }
     if (kind === 'audio') {
-      editor.chain().focus().insertContent(`<audio controls src="${dataUrl}" title="${safeName}"></audio><p></p>`).run();
+      editor.chain().focus().insertContent(`<audio controls src="${dataUrl}" title="${safeName}"${attachmentAttr}></audio><p></p>`).run();
       showToast('音频已插入');
       return;
     }
-    editor.chain().focus().insertContent(`<file-attachment href="${dataUrl}" filename="${safeName}"></file-attachment>`).run();
+    editor.chain().focus().insertContent(`<file-attachment href="${dataUrl}" filename="${safeName}"${attachmentAttr}></file-attachment>`).run();
     showToast('文件已插入');
   }
 
@@ -462,7 +519,24 @@ export function EditorPane({
     }
     setImageUploadProgress(10);
     const src = await fileToBase64Image(file);
-    editor.chain().focus().updateAttributes('image', { src, alt: file.name }).run();
+    const attrs = editor.getAttributes('image') as { attachmentId?: string };
+    let attachmentId = attrs.attachmentId;
+    if (attachmentId) {
+      await updateImageAttachment(attachmentId, {
+        data: src,
+        mimeType: dataUrlMimeType(src),
+        sizeBytes: dataUrlSizeBytes(src),
+      });
+    } else if (note) {
+      const attachment = await createImageAttachment({
+        noteId: note.id,
+        data: src,
+        mimeType: dataUrlMimeType(src),
+        sizeBytes: dataUrlSizeBytes(src),
+      });
+      attachmentId = attachment.id;
+    }
+    editor.chain().focus().updateAttributes('image', { src, alt: file.name, attachmentId }).run();
     setImageUploadProgress(100);
     setImageBubble(null);
     setImageMenu(null);
@@ -520,7 +594,8 @@ export function EditorPane({
       translate: `<p>Translation: ${source}</p>`,
       title: `<h2>${source.split(/[。.!?\n]/)[0].slice(0, 28) || '新的标题'}</h2>`,
       outline: '<ul><li>背景与目标</li><li>关键内容</li><li>下一步行动</li></ul>',
-      todos: '<ul><li>[ ] 整理重点</li><li>[ ] 确认下一步</li></ul>',
+      todos:
+        '<ul data-type="taskList"><li data-type="taskItem" data-checked="false"><p>整理重点</p></li><li data-type="taskItem" data-checked="false"><p>确认下一步</p></li></ul>',
     };
 
     editor.chain().focus().insertContent(snippets[action] || '').run();
@@ -540,6 +615,13 @@ export function EditorPane({
   }
 
   function deleteSelectedImage() {
+    const attachmentId =
+      (editor?.getAttributes('image') as { attachmentId?: string } | undefined)?.attachmentId ||
+      imageBubble?.attachmentId ||
+      imageMenu?.attachmentId;
+    if (attachmentId) {
+      void updateImageAttachment(attachmentId, { deletedAt: Date.now() });
+    }
     editor?.chain().focus().deleteSelection().run();
     setImageBubble(null);
     setImageMenu(null);
@@ -617,7 +699,7 @@ export function EditorPane({
   const slashCommands: Array<{ label: string; content: string | null; inputRef: React.RefObject<HTMLInputElement> | null }> = [
     { label: 'Text', content: '<p>Text</p>', inputRef: null },
     { label: 'Heading', content: '<h2>Heading</h2>', inputRef: null },
-    { label: 'Todo', content: '<ul><li>[ ] Todo</li></ul>', inputRef: null },
+    { label: 'Todo', content: TASK_LIST_TEMPLATE, inputRef: null },
     { label: 'Image', content: null, inputRef: fileInputRef },
     { label: 'Video', content: null, inputRef: videoInputRef },
     { label: 'Audio', content: null, inputRef: audioInputRef },
@@ -632,7 +714,7 @@ export function EditorPane({
   ];
 
   return (
-    <main className={`grid min-w-0 flex-1 grid-rows-[auto_1fr_48px] bg-white ${focusMode ? 'marknote-focus-mode' : ''}`}>
+    <main className={`grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)_48px] bg-white ${focusMode ? 'marknote-focus-mode' : ''}`}>
       <header className={`bg-white px-8 pb-2 pt-5 ${focusMode ? 'hidden' : ''}`}>
         <div className="flex items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3">
@@ -642,14 +724,19 @@ export function EditorPane({
               className="min-w-0 bg-transparent text-[17px] font-semibold leading-tight text-[#111827] outline-none"
               placeholder={t('note.untitled')}
             />
-            <div className="flex h-6 items-center gap-1.5 text-[13px] text-[#4b5563]">
-              <span
-                className={`h-2 w-2 rounded-full ${
-                  saveState === 'saving' ? 'bg-[#f59e0b]' : saveState === 'saved' ? 'bg-[#22c55e]' : 'bg-[#22c55e]'
-                }`}
-              />
-              {saveState === 'saving' ? t('editor.saveSaving') : saveState === 'saved' ? t('editor.saveSaved') : '已保存'}
-            </div>
+            <EditorSyncStatus
+              saveState={saveState}
+              syncConfigured={syncConfigured}
+              syncSessionActive={syncSessionActive}
+              syncSyncing={syncSyncing}
+              syncCheckingBackend={syncCheckingBackend}
+              syncError={syncError}
+              syncLastResultOk={syncLastResultOk}
+              syncQueuePending={syncQueuePending}
+              syncQueueFailed={syncQueueFailed}
+              onSyncRetry={onSyncRetry}
+              onSyncDiagnose={onSyncDiagnose}
+            />
           </div>
 
           <div className="flex shrink-0 items-center gap-3 text-[#111827]">
@@ -885,7 +972,7 @@ export function EditorPane({
           <ToolbarGroup label={t('editor.contentBlocks')}>
             <IconButton icon={List} label={t('editor.bulletList')} onClick={() => editor?.chain().focus().toggleBulletList().run()} />
             <IconButton icon={ListOrdered} label={t('editor.orderedList')} active={editor?.isActive('orderedList')} onClick={() => editor?.chain().focus().toggleOrderedList().run()} />
-            <IconButton icon={CheckSquare} label={t('editor.checklist')} onClick={() => insertParagraphBlock('<ul><li>[ ] Todo</li></ul>')} />
+            <IconButton icon={CheckSquare} label={t('editor.checklist')} onClick={() => insertParagraphBlock(TASK_LIST_TEMPLATE)} />
             <IconButton icon={Quote} label={t('editor.quote')} active={editor?.isActive('blockquote')} onClick={() => editor?.chain().focus().toggleBlockquote().run()} />
             <IconButton icon={MinusIcon} label={t('editor.divider')} onClick={() => insertParagraphBlock('<hr><p></p>')} />
             <IconButton icon={Link} label="链接" onClick={() => insertParagraphBlock('<p><a href="#">链接</a></p>')} />
@@ -951,7 +1038,7 @@ export function EditorPane({
 
       <section
         ref={editorShellRef}
-        className={`relative min-h-0 overflow-y-auto bg-white pb-10 pl-14 pr-10 pt-7 transition ${wideLayout ? 'marknote-wide-editor' : ''} ${
+        className={`relative min-h-0 overflow-y-auto bg-white pb-20 pl-14 pr-10 pt-7 transition ${wideLayout ? 'marknote-wide-editor' : ''} ${
           isImageDragOver ? 'ring-2 ring-inset ring-primary-300' : ''
         }`}
         onMouseMove={updateCodeCopyOverlay}
@@ -992,6 +1079,9 @@ export function EditorPane({
             event.preventDefault();
             editor?.chain().focus().toggleBold().run();
           }
+        }}
+        onClick={(event) => {
+          focusEditorEndFromCanvasClick(editor, event.target, event.currentTarget);
         }}
       >
         {imageUploadProgress !== null ? (
@@ -1216,7 +1306,7 @@ export function EditorPane({
           </div>
         ) : null}
       </section>
-      <footer className="flex items-center justify-between border-t border-[#e5e7eb] px-9 text-[13px] text-[#6b7280]">
+      <footer className="flex h-12 items-center justify-between border-t border-[#e5e7eb] px-9 text-[13px] text-[#6b7280]">
         <div className="flex items-center gap-7">
           <span>字数：{stats.characters}</span>
           <span>词数：{stats.words}</span>
@@ -1370,6 +1460,16 @@ const VideoNode = TiptapNode.create({
       src: { default: null },
       title: { default: null },
       controls: { default: true },
+      attachmentId: {
+        default: null,
+        parseHTML: (element) => element.getAttribute('data-attachment-id'),
+        renderHTML: (attributes) =>
+          attributes.attachmentId
+            ? {
+                'data-attachment-id': attributes.attachmentId,
+              }
+            : {},
+      },
     };
   },
 
@@ -1392,6 +1492,16 @@ const AudioNode = TiptapNode.create({
       src: { default: null },
       title: { default: null },
       controls: { default: true },
+      attachmentId: {
+        default: null,
+        parseHTML: (element) => element.getAttribute('data-attachment-id'),
+        renderHTML: (attributes) =>
+          attributes.attachmentId
+            ? {
+                'data-attachment-id': attributes.attachmentId,
+              }
+            : {},
+      },
     };
   },
 
@@ -1413,6 +1523,16 @@ const FileAttachmentNode = TiptapNode.create({
     return {
       href: { default: null },
       filename: { default: '下载文件' },
+      attachmentId: {
+        default: null,
+        parseHTML: (element) => element.getAttribute('data-attachment-id'),
+        renderHTML: (attributes) =>
+          attributes.attachmentId
+            ? {
+                'data-attachment-id': attributes.attachmentId,
+              }
+            : {},
+      },
     };
   },
 

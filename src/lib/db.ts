@@ -77,6 +77,8 @@ const DEFAULT_FOLDERS: Folder[] = [
   createFolderDraft({ id: ARCHIVE_FOLDER_ID, name: '归档', sortOrder: 2 }),
 ];
 
+const LEGACY_WELCOME_SYNC_LINE = '<li>所有内容会自动保存到云端</li>';
+const LOCAL_FIRST_WELCOME_SYNC_LINE = '<li>内容会先自动保存到本地，登录后再同步到云端</li>';
 const WELCOME_CONTENT = `<h1>👋 欢迎使用 MarkNote</h1>
 <p>这是一个支持图文混排、代码块、标签、导入导出的跨平台笔记应用。你可以拖拽粘贴图片，也可以使用工具栏插入代码块。</p>
 <h3>📌 快速开始</h3>
@@ -84,7 +86,7 @@ const WELCOME_CONTENT = `<h1>👋 欢迎使用 MarkNote</h1>
 <li>在左侧创建或选择笔记本</li>
 <li>在中间列表选择笔记</li>
 <li>在右侧开始编辑你的内容</li>
-<li>所有内容会自动保存到云端</li>
+${LOCAL_FIRST_WELCOME_SYNC_LINE}
 </ul>
 <h3>💻 代码示例</h3>
 <pre><code class="language-javascript">const note = 'Write once, keep everywhere';
@@ -92,11 +94,32 @@ console.log(note);
 export default note;</code></pre>
 <h3>✨ 更多功能</h3>
 <ul data-type="taskList">
-<li data-checked="true"><p>支持 Markdown 语法</p></li>
-<li data-checked="true"><p>支持代码高亮</p></li>
-<li data-checked="false"><p>支持导入导出</p></li>
-<li data-checked="false"><p>支持多端同步</p></li>
+<li data-type="taskItem" data-checked="true"><p>支持 Markdown 语法</p></li>
+<li data-type="taskItem" data-checked="true"><p>支持代码高亮</p></li>
+<li data-type="taskItem" data-checked="false"><p>支持导入导出</p></li>
+<li data-type="taskItem" data-checked="false"><p>支持多端同步</p></li>
 </ul>`;
+const LEGACY_WELCOME_CONTENT = WELCOME_CONTENT.replace(LOCAL_FIRST_WELCOME_SYNC_LINE, LEGACY_WELCOME_SYNC_LINE);
+const LEGACY_TASK_ITEM_WELCOME_CONTENT = removeWelcomeTaskItemTypes(WELCOME_CONTENT);
+const LEGACY_SYNC_AND_TASK_ITEM_WELCOME_CONTENT = removeWelcomeTaskItemTypes(LEGACY_WELCOME_CONTENT);
+const PLAIN_TASK_LIST_WELCOME_CONTENT = stripWelcomeTaskListAttrs(WELCOME_CONTENT);
+const PLAIN_TASK_LIST_AND_LEGACY_SYNC_WELCOME_CONTENT = stripWelcomeTaskListAttrs(LEGACY_WELCOME_CONTENT);
+const WELCOME_TEMPLATE_CONTENTS = new Set([
+  LEGACY_WELCOME_CONTENT,
+  LEGACY_TASK_ITEM_WELCOME_CONTENT,
+  LEGACY_SYNC_AND_TASK_ITEM_WELCOME_CONTENT,
+  PLAIN_TASK_LIST_WELCOME_CONTENT,
+  PLAIN_TASK_LIST_AND_LEGACY_SYNC_WELCOME_CONTENT,
+]);
+const WELCOME_TEMPLATE_TEXT_CONTENTS = [
+  WELCOME_CONTENT,
+  LEGACY_WELCOME_CONTENT,
+  LEGACY_TASK_ITEM_WELCOME_CONTENT,
+  LEGACY_SYNC_AND_TASK_ITEM_WELCOME_CONTENT,
+  PLAIN_TASK_LIST_WELCOME_CONTENT,
+  PLAIN_TASK_LIST_AND_LEGACY_SYNC_WELCOME_CONTENT,
+];
+let welcomeTemplateTextCache: Set<string> | null = null;
 
 const WELCOME_NOTE_ID = 'marknote-welcome-note';
 const SAMPLE_NOTES: Array<Partial<Note> & { id: string }> = [
@@ -147,10 +170,17 @@ export async function ensureSeedNote(): Promise<string> {
 
   const welcome = await db.notes.get(WELCOME_NOTE_ID);
   if (welcome) {
+    const nextContent = shouldMigrateWelcomeTemplate(welcome) ? normalizeWelcomeContent(welcome.content) : welcome.content;
     await db.notes.update(welcome.id, {
       folderId: welcome.folderId || DEFAULT_FOLDER_ID,
       tags: welcome.tags?.length ? welcome.tags : ['资料库', '个人'],
       pinned: welcome.pinned ?? true,
+      ...(nextContent === welcome.content
+        ? {}
+        : {
+            content: nextContent,
+            rawContent: stripHtml(nextContent),
+          }),
     });
     await ensureSampleNotes();
     return welcome.id;
@@ -178,6 +208,35 @@ export async function ensureSeedNote(): Promise<string> {
   await db.notes.put(note);
   await ensureSampleNotes();
   return note.id;
+}
+
+function shouldMigrateWelcomeTemplate(note: Note): boolean {
+  return (note.version ?? 1) <= 1 && (note.syncStatus ?? 'local') === 'local';
+}
+
+function normalizeWelcomeContent(content: string): string {
+  if (WELCOME_TEMPLATE_CONTENTS.has(content) || hasWelcomeTemplateText(content)) {
+    return WELCOME_CONTENT;
+  }
+  return content;
+}
+
+function hasWelcomeTemplateText(content: string): boolean {
+  const text = stripHtml(content);
+  if (!welcomeTemplateTextCache) {
+    welcomeTemplateTextCache = new Set(WELCOME_TEMPLATE_TEXT_CONTENTS.map((template) => stripHtml(template)));
+  }
+  return welcomeTemplateTextCache.has(text);
+}
+
+function removeWelcomeTaskItemTypes(content: string): string {
+  return content.replace(/<li data-type="taskItem" data-checked="(true|false)">/g, '<li data-checked="$1">');
+}
+
+function stripWelcomeTaskListAttrs(content: string): string {
+  return content
+    .replace('<ul data-type="taskList">\n', '<ul>\n')
+    .replace(/<li data-type="taskItem" data-checked="(?:true|false)">/g, '<li>');
 }
 
 async function ensureSampleNotes(): Promise<void> {
@@ -217,6 +276,23 @@ export function createNoteDraft(input?: Partial<Note>): Note {
   };
 }
 
+export function createImageAttachmentDraft(input: Partial<ImageAttachment> & Pick<ImageAttachment, 'noteId' | 'data'>): ImageAttachment {
+  const now = Date.now();
+  return {
+    id: input.id ?? nanoid(),
+    noteId: input.noteId,
+    data: input.data,
+    mimeType: input.mimeType || 'application/octet-stream',
+    storagePath: input.storagePath,
+    sizeBytes: input.sizeBytes,
+    createdAt: input.createdAt ?? now,
+    updatedAt: input.updatedAt ?? now,
+    deletedAt: input.deletedAt ?? null,
+    syncStatus: input.syncStatus ?? 'local',
+    lastSyncedAt: input.lastSyncedAt ?? null,
+  };
+}
+
 export async function createNote(input?: Partial<Note>): Promise<Note> {
   const note = createNoteDraft(input);
   await db.transaction('rw', db.notes, db.syncQueue, async () => {
@@ -244,7 +320,7 @@ export async function updateNote(id: string, changes: Partial<Note>, options?: {
   const content = changes.content;
   const existing = await db.notes.get(id);
   const nextUpdatedAt = changes.updatedAt ?? Date.now();
-  await db.transaction('rw', db.notes, db.syncQueue, async () => {
+  await db.transaction('rw', db.notes, db.images, db.syncQueue, async () => {
     await db.notes.update(id, {
       ...changes,
       rawContent: content === undefined ? changes.rawContent : stripHtml(content),
@@ -254,6 +330,39 @@ export async function updateNote(id: string, changes: Partial<Note>, options?: {
     });
     if (enqueue) {
       await enqueueSync('note', id, 'upsert');
+    }
+    if (enqueue && content !== undefined) {
+      await markDetachedAttachmentsDeleted(id, content, nextUpdatedAt);
+    }
+  });
+}
+
+export async function createImageAttachment(input: Partial<ImageAttachment> & Pick<ImageAttachment, 'noteId' | 'data'>): Promise<ImageAttachment> {
+  const attachment = createImageAttachmentDraft(input);
+  await db.transaction('rw', db.images, db.syncQueue, async () => {
+    await db.images.put({ ...attachment, syncStatus: 'pending' });
+    await enqueueSync('attachment', attachment.id, 'upsert');
+  });
+  return attachment;
+}
+
+export async function updateImageAttachment(
+  id: string,
+  changes: Partial<ImageAttachment>,
+  options?: { enqueueSync?: boolean },
+): Promise<void> {
+  const enqueue = options?.enqueueSync ?? true;
+  const existing = await db.images.get(id);
+  const nextUpdatedAt = changes.updatedAt ?? Date.now();
+  await db.transaction('rw', db.images, db.syncQueue, async () => {
+    await db.images.update(id, {
+      ...changes,
+      updatedAt: nextUpdatedAt,
+      storagePath: changes.storagePath ?? (changes.data ? undefined : existing?.storagePath),
+      syncStatus: enqueue ? 'pending' : (changes.syncStatus ?? existing?.syncStatus ?? 'local'),
+    });
+    if (enqueue) {
+      await enqueueSync('attachment', id, changes.deletedAt ? 'delete' : 'upsert');
     }
   });
 }
@@ -362,7 +471,6 @@ export async function deleteFolderLocally(id: string, targetFolderId = DEFAULT_F
   await db.transaction('rw', db.folders, db.notes, async () => {
     await db.notes.where('folderId').equals(id).modify((note) => {
       note.folderId = targetFolderId;
-      note.updatedAt = Date.now();
     });
     await db.folders.delete(id);
   });
@@ -401,7 +509,22 @@ export async function restoreNote(id: string): Promise<void> {
 
 export async function permanentlyDeleteNote(id: string): Promise<void> {
   await db.transaction('rw', db.notes, db.images, db.syncQueue, async () => {
-    await db.images.where('noteId').equals(id).delete();
+    const images = await db.images.where('noteId').equals(id).toArray();
+    const now = Date.now();
+    for (const image of images) {
+      if (image.storagePath) {
+        await db.images.put({
+          ...image,
+          data: '',
+          deletedAt: now,
+          updatedAt: now,
+          syncStatus: 'pending',
+        });
+        await enqueueSync('attachment', image.id, 'delete');
+      } else {
+        await db.images.delete(image.id);
+      }
+    }
     await db.notes.delete(id);
     await enqueueSync('note', id, 'delete');
   });
@@ -449,6 +572,40 @@ export async function enqueueSync(entity: SyncEntity, entityId: string, operatio
     updatedAt: now,
     attempts: 0,
   });
+}
+
+async function markDetachedAttachmentsDeleted(noteId: string, content: string, deletedAt: number): Promise<void> {
+  const attachedIds = extractAttachmentIds(content);
+  const attachments = await db.images.where('noteId').equals(noteId).toArray();
+  for (const attachment of attachments) {
+    if (attachment.deletedAt || attachedIds.has(attachment.id)) {
+      continue;
+    }
+    if (!attachment.storagePath) {
+      await db.images.delete(attachment.id);
+      continue;
+    }
+    await db.images.put({
+      ...attachment,
+      data: '',
+      deletedAt,
+      updatedAt: deletedAt,
+      syncStatus: 'pending',
+    });
+    await enqueueSync('attachment', attachment.id, 'delete');
+  }
+}
+
+function extractAttachmentIds(content: string): Set<string> {
+  if (!content) {
+    return new Set();
+  }
+  const doc = new DOMParser().parseFromString(content, 'text/html');
+  return new Set(
+    Array.from(doc.querySelectorAll('[data-attachment-id]'))
+      .map((element) => element.getAttribute('data-attachment-id') || '')
+      .filter(Boolean),
+  );
 }
 
 function entityTable(entity: SyncEntity): Table<Folder | Note | ImageAttachment, string> | null {

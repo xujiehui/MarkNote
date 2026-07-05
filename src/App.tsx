@@ -21,6 +21,8 @@ import {
 } from './lib/db';
 import { stripHtml } from './lib/html';
 import { useDebouncedValue } from './hooks/useDebouncedValue';
+import { isDraftSaveSnapshotCurrent, resolveActiveNoteDraftValue, shouldResetActiveNoteDraftMeta } from './lib/editorDraft';
+import { DEFAULT_STORAGE_QUOTA_BYTES, formatBytes, storageUsagePercent, storageUsedBytes } from './lib/storageUsage';
 import { Sidebar } from './components/Sidebar';
 import { NoteList } from './components/NoteList';
 import { EditorPane, type NoteSnapshot } from './components/EditorPane';
@@ -31,6 +33,7 @@ import { ExportMenu } from './components/ExportMenu';
 import { LandingPage } from './LandingPage';
 import { getFolderDisplayName, getTagDisplayName, useI18n } from './i18n';
 import { useSyncSession } from './sync/useSyncSession';
+import { syncDisplayError } from './sync/syncDisplayStatus';
 import { normalizeTags, TAG_PALETTE } from './lib/tags';
 
 interface ContextState {
@@ -93,16 +96,6 @@ function createDefaultShareSettings(noteId: string): ShareSettings {
   };
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`;
-  }
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
-
 function uniqueRecentNoteIds(noteIds: string[], nextId: string) {
   return [nextId, ...noteIds.filter((id) => id !== nextId)].slice(0, RECENT_NOTE_LIMIT);
 }
@@ -111,6 +104,7 @@ function NoteWorkspace() {
   const { t } = useI18n();
   const folders = useLiveQuery(() => db.folders.orderBy('sortOrder').toArray(), [], []);
   const notes = useLiveQuery(() => db.notes.toArray(), [], []);
+  const attachments = useLiveQuery(() => db.images.toArray(), [], []);
   const [activeNoteId, setActiveNoteId] = useState<string>('');
   const [query, setQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<WorkspaceFilter>('all');
@@ -138,7 +132,10 @@ function NoteWorkspace() {
   const [recentNoteIds, setRecentNoteIds] = usePersistentState<string[]>('marknote-recent-notes', []);
   const [tagManagerOpen, setTagManagerOpen] = useState(false);
   const sync = useSyncSession();
+  const syncError = syncDisplayError(sync.error, sync.backendCheck, { includeBackendCheck: Boolean(sync.session) });
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const activeNoteIdRef = useRef('');
+  const latestDraftRef = useRef({ noteId: '', title: '', content: '' });
   const debouncedQuery = useDebouncedValue(query, 180);
   const activeNote = notes.find((note) => note.id === activeNoteId);
   const activeSnapshots = activeNoteId ? snapshotsByNoteId[activeNoteId] || [] : [];
@@ -216,16 +213,35 @@ function NoteWorkspace() {
 
   useEffect(() => {
     if (!activeNote) {
+      activeNoteIdRef.current = '';
       setDraftTitle('');
       setDraftContent('');
       setDirty(false);
       return;
     }
 
-    setDraftTitle(activeNote.title);
-    setDraftContent(activeNote.content);
-    setDirty(false);
-    setSaveState('idle');
+    const noteChanged = activeNoteIdRef.current !== activeNote.id;
+    setDraftTitle((currentTitle) =>
+      resolveActiveNoteDraftValue({
+        current: currentTitle,
+        incoming: activeNote.title,
+        noteChanged,
+        dirty,
+      }),
+    );
+    setDraftContent((currentContent) =>
+      resolveActiveNoteDraftValue({
+        current: currentContent,
+        incoming: activeNote.content,
+        noteChanged,
+        dirty,
+      }),
+    );
+    if (shouldResetActiveNoteDraftMeta(noteChanged, dirty)) {
+      setDirty(false);
+      setSaveState('idle');
+    }
+    activeNoteIdRef.current = activeNote.id;
     setSnapshotsByNoteId((current) => {
       if (current[activeNote.id]?.length) {
         return current;
@@ -242,7 +258,15 @@ function NoteWorkspace() {
         ],
       };
     });
-  }, [activeNote, setSnapshotsByNoteId]);
+  }, [activeNote, dirty, setSnapshotsByNoteId]);
+
+  useEffect(() => {
+    latestDraftRef.current = {
+      noteId: activeNoteId,
+      title: draftTitle,
+      content: draftContent,
+    };
+  }, [activeNoteId, draftTitle, draftContent]);
 
   useEffect(() => {
     if (!activeNoteId || !dirty) {
@@ -250,6 +274,11 @@ function NoteWorkspace() {
     }
 
     setSaveState('saving');
+    const snapshot = {
+      noteId: activeNoteId,
+      title: draftTitle,
+      content: draftContent,
+    };
     const timer = window.setTimeout(async () => {
       const savedAt = Date.now();
       await updateNote(activeNoteId, {
@@ -258,9 +287,15 @@ function NoteWorkspace() {
         updatedAt: savedAt,
       });
       addSnapshot(activeNoteId, draftTitle || t('note.untitled'), draftContent, { createdAt: savedAt });
-      setDirty(false);
-      setSaveState('saved');
-      window.setTimeout(() => setSaveState('idle'), 900);
+      if (isDraftSaveSnapshotCurrent(snapshot, latestDraftRef.current)) {
+        setDirty(false);
+        setSaveState('saved');
+        window.setTimeout(() => {
+          if (isDraftSaveSnapshotCurrent(snapshot, latestDraftRef.current)) {
+            setSaveState('idle');
+          }
+        }, 900);
+      }
     }, 1000);
 
     return () => window.clearTimeout(timer);
@@ -340,10 +375,9 @@ function NoteWorkspace() {
     const hidden = new Set(hiddenTags);
     return normalizeTags([...DEFAULT_TAGS, ...customTags, ...activeNotes.flatMap((note) => note.tags)]).filter((tag) => !hidden.has(tag));
   }, [activeNotes, customTags, hiddenTags]);
-  const storageUsedBytes = useMemo(() => new Blob(notes.map((note) => `${note.title}${note.content}${note.tags.join('')}`)).size, [notes]);
-  const storageQuotaBytes = 10 * 1024 * 1024;
-  const storagePercent = Math.max(1, Math.min(100, Math.round((storageUsedBytes / storageQuotaBytes) * 100)));
-  const storageUsedLabel = `${formatBytes(storageUsedBytes)} / ${formatBytes(storageQuotaBytes)}`;
+  const storageBytes = useMemo(() => storageUsedBytes(notes, attachments), [attachments, notes]);
+  const storagePercent = storageUsagePercent(storageBytes, DEFAULT_STORAGE_QUOTA_BYTES);
+  const storageUsedLabel = `${formatBytes(storageBytes)} / ${formatBytes(DEFAULT_STORAGE_QUOTA_BYTES)}`;
 
   const searchResults = useMemo<SearchResultGroups>(() => {
     const value = debouncedQuery.trim().toLowerCase();
@@ -460,6 +494,11 @@ function NoteWorkspace() {
       return;
     }
     const savedAt = Date.now();
+    const snapshot = {
+      noteId: activeNoteId,
+      title: draftTitle,
+      content: draftContent,
+    };
     setSaveState('saving');
     await updateNote(activeNoteId, {
       title: draftTitle || t('note.untitled'),
@@ -467,9 +506,15 @@ function NoteWorkspace() {
       updatedAt: savedAt,
     });
     addSnapshot(activeNoteId, draftTitle || t('note.untitled'), draftContent, { force: true, createdAt: savedAt });
-    setDirty(false);
-    setSaveState('saved');
-    window.setTimeout(() => setSaveState('idle'), 900);
+    if (isDraftSaveSnapshotCurrent(snapshot, latestDraftRef.current)) {
+      setDirty(false);
+      setSaveState('saved');
+      window.setTimeout(() => {
+        if (isDraftSaveSnapshotCurrent(snapshot, latestDraftRef.current)) {
+          setSaveState('idle');
+        }
+      }, 900);
+    }
   }, [activeNoteId, addSnapshot, draftTitle, draftContent, t]);
 
   const createNewNote = useCallback(async () => {
@@ -905,6 +950,14 @@ function NoteWorkspace() {
         <EditorPane
           note={activeNote ? { ...activeNote, title: draftTitle, content: draftContent } : undefined}
           saveState={saveState}
+          syncConfigured={sync.configured}
+          syncSessionActive={Boolean(sync.session)}
+          syncSyncing={sync.syncing}
+          syncCheckingBackend={sync.checkingBackend}
+          syncError={syncError}
+          syncLastResultOk={Boolean(sync.lastResult?.ok)}
+          syncQueuePending={sync.queue.pending}
+          syncQueueFailed={sync.queue.failed}
           snapshots={activeSnapshots}
           shareSettings={activeShareSettings}
           tags={allTags}
@@ -912,6 +965,8 @@ function NoteWorkspace() {
           onTitleChange={setTitle}
           onContentChange={setContent}
           onManualSave={() => void manualSave()}
+          onSyncRetry={() => void sync.syncNow()}
+          onSyncDiagnose={() => void sync.checkBackend()}
           onToggleTag={(tag) => void toggleActiveTag(tag)}
           onTogglePin={() => void toggleActivePin()}
           onDeleteNote={() => {

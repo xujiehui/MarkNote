@@ -82,7 +82,7 @@ button {
 }
 
 .prose-editor {
-  min-height: calc(100dvh - 245px);
+  min-height: 100%;
   max-width: 900px;
   margin: 0 auto;
   outline: none;
@@ -105,7 +105,7 @@ button {
 
 .marknote-focus-mode .prose-editor {
   max-width: 820px;
-  min-height: calc(100dvh - 80px);
+  min-height: 100%;
 }
 
 .marknote-dark {
@@ -561,14 +561,12 @@ button {
   border-top: 1px solid var(--gray-200);
 }
 
-.prose-editor ul[data-type="taskList"],
-.prose-editor h3:nth-of-type(3) + ul {
+.prose-editor ul[data-type="taskList"] {
   list-style: none;
   padding-left: 0;
 }
 
-.prose-editor ul[data-type="taskList"] li,
-.prose-editor h3:nth-of-type(3) + ul li {
+.prose-editor ul[data-type="taskList"] li {
   position: relative;
   display: flex;
   align-items: flex-start;
@@ -576,38 +574,55 @@ button {
   margin: 0.35rem 0;
 }
 
-.prose-editor ul[data-type="taskList"] li::before,
-.prose-editor h3:nth-of-type(3) + ul li::before {
-  content: "";
+.prose-editor ul[data-type="taskList"] li > label {
+  display: grid;
+  place-items: center;
   width: 16px;
   height: 16px;
   margin-top: 0.34rem;
   flex: 0 0 auto;
+  cursor: pointer;
+}
+
+.prose-editor ul[data-type="taskList"] li > label input {
+  appearance: none;
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  margin: 0;
   border: 1px solid #cfd5dd;
   border-radius: 3px;
   background: #fff;
+  cursor: pointer;
 }
 
-.prose-editor ul[data-type="taskList"] li[data-checked="true"]::before,
-.prose-editor h3:nth-of-type(3) + ul li:nth-child(-n + 2)::before {
+.prose-editor ul[data-type="taskList"] li > label span {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  pointer-events: none;
+}
+
+.prose-editor ul[data-type="taskList"] li[data-checked="true"] > label input {
   border-color: #2f7df6;
   background: #2f7df6;
-  box-shadow: inset 0 0 0 3px #2f7df6;
 }
 
-.prose-editor ul[data-type="taskList"] li[data-checked="true"]::after,
-.prose-editor h3:nth-of-type(3) + ul li:nth-child(-n + 2)::after {
+.prose-editor ul[data-type="taskList"] li[data-checked="true"] > label span::after {
   content: "✓";
   position: absolute;
-  margin-left: 3px;
-  margin-top: 0.08rem;
+  left: 3px;
+  top: -1px;
   color: #fff;
   font-size: 13px;
   font-weight: 700;
 }
 
-.prose-editor ul[data-type="taskList"] li p,
-.prose-editor h3:nth-of-type(3) + ul li p {
+.prose-editor ul[data-type="taskList"] li > div {
+  min-width: 0;
+}
+
+.prose-editor ul[data-type="taskList"] li p {
   margin: 0;
 }
 

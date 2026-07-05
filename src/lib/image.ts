@@ -53,3 +53,12 @@ export function dataUrlMimeType(dataUrl: string): string {
   const match = dataUrl.match(/^data:([^;]+);base64,/);
   return match?.[1] || 'application/octet-stream';
 }
+
+export function dataUrlSizeBytes(dataUrl: string): number {
+  const [, encoded = ''] = dataUrl.split(',');
+  if (!encoded) {
+    return 0;
+  }
+  const padding = encoded.endsWith('==') ? 2 : encoded.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor((encoded.length * 3) / 4) - padding);
+}
