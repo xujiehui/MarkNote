@@ -1,6 +1,7 @@
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { loadSupabaseRuntimeConfig, readLocalEnv } from './sync-config.mjs';
 
 const migrationPath = resolve('supabase/migrations/202606190001_marknote_sync_schema.sql');
 const migrationName = 'marknote_sync_schema';
@@ -23,15 +24,11 @@ const expectedStoragePolicies = [
   'Users can update own attachment objects',
   'Users can delete own attachment objects',
 ];
-const env = {
-  ...readEnvFile('.env'),
-  ...readEnvFile('.env.local'),
-  ...process.env,
-};
+const env = readLocalEnv();
 
 const managementApiUrl = (env.SUPABASE_MANAGEMENT_API_URL || 'https://api.supabase.com').replace(/\/$/, '');
 const managementToken = env.SUPABASE_MANAGEMENT_TOKEN || env.SUPABASE_API_ACCESS_TOKEN || env.SUPABASE_PAT || '';
-const projectRef = env.SUPABASE_PROJECT_REF || projectRefFromUrl(env.VITE_SUPABASE_URL || '');
+let projectRef = env.SUPABASE_PROJECT_REF || '';
 const shouldApply = process.argv.includes('--apply');
 const shouldForce = process.argv.includes('--force');
 
@@ -51,7 +48,13 @@ try {
 
 async function main() {
   if (!projectRef) {
-    throw new ApplyFailedError('SUPABASE_PROJECT_REF is missing and could not be inferred from VITE_SUPABASE_URL.');
+    const config = await loadSupabaseRuntimeConfig(env);
+    if (config.provider === 'supabase') {
+      projectRef = projectRefFromUrl(config.supabase.url);
+    }
+  }
+  if (!projectRef) {
+    throw new ApplyFailedError('SUPABASE_PROJECT_REF is missing and could not be inferred from the sync configuration backend API.');
   }
   if (!managementToken) {
     throw new ApplyFailedError(
@@ -368,25 +371,6 @@ function projectRefFromUrl(value) {
     return match?.[1] || '';
   } catch {
     return '';
-  }
-}
-
-function readEnvFile(path) {
-  try {
-    return Object.fromEntries(
-      readFileSync(resolve(path), 'utf8')
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter((line) => line && !line.startsWith('#') && line.includes('='))
-        .map((line) => {
-          const index = line.indexOf('=');
-          const key = line.slice(0, index).trim();
-          const value = line.slice(index + 1).trim().replace(/^['"]|['"]$/g, '');
-          return [key, value];
-        }),
-    );
-  } catch {
-    return {};
   }
 }
 

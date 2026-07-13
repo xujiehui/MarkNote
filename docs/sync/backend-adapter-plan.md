@@ -10,13 +10,30 @@ MarkNote stays local-first. The backend is an optional sync target behind `Remot
 - Sync engine: `src/sync/engine.ts`.
 - Local source of truth: Dexie tables in `src/lib/db.ts`.
 
-Required environment variables:
+Required app runtime configuration:
 
 ```bash
-VITE_SYNC_PROVIDER=supabase
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_or_anon_key
-VITE_SUPABASE_AUTH_REDIRECT_URL=http://127.0.0.1:5173/?app=1
+VITE_SYNC_CONFIG_URL=https://api.example.com/marknote/sync-config
+```
+
+The backend endpoint stores and returns the Supabase runtime configuration:
+
+```json
+{
+  "provider": "supabase",
+  "supabase": {
+    "url": "https://your-project.supabase.co",
+    "publishableKey": "sb_publishable_or_anon_key",
+    "authRedirectUrl": "http://127.0.0.1:5173/?app=1"
+  }
+}
+```
+
+The distributed app should only know `VITE_SYNC_CONFIG_URL`. Supabase project URL, publishable key, and redirect override belong to the backend configuration response, not to app-local Vite environment variables.
+
+Optional local verification variables:
+
+```bash
 
 # Optional CLI-only release verification. Do not commit a real token.
 # SUPABASE_ACCESS_TOKEN=eyJ...
@@ -29,7 +46,7 @@ VITE_SUPABASE_AUTH_REDIRECT_URL=http://127.0.0.1:5173/?app=1
 # SUPABASE_MANAGEMENT_TOKEN=sbp_...
 ```
 
-If these variables are missing, MarkNote runs in local-only mode.
+If `VITE_SYNC_CONFIG_URL` is missing, MarkNote runs in local-only mode.
 
 ## Stable Adapter Contract
 
@@ -126,7 +143,7 @@ Future improvements:
 4. Add the Supabase callback URL to that Google OAuth client's Authorized redirect URIs: `https://<project-ref>.supabase.co/auth/v1/callback`.
 5. Enable the Google Auth provider in the Supabase Dashboard and paste the Google OAuth Client ID and Client Secret.
 6. Add the MarkNote app URL to Supabase Auth redirect URLs, for example `http://127.0.0.1:5173/?app=1` in local development and the production app URL after deployment. For CLI OAuth release checks, also allow the loopback callback pattern `http://127.0.0.1:**/auth/callback`. For the packaged desktop app, add `marknote://auth/callback`.
-7. Set the Vite environment variables.
+7. Store the Supabase URL, publishable key, and optional web redirect URL in your sync configuration backend endpoint, then set `VITE_SYNC_CONFIG_URL` to that endpoint for the app build.
 8. Run `npm run check:google-oauth` and confirm Google accepts the configured OAuth client. If it reports `invalid_client`, the Google OAuth client configured in Supabase is missing, wrong, or not a Web application client.
 9. Run `npm run check:supabase-migration` with `SUPABASE_MANAGEMENT_TOKEN` to confirm the migration history, sync tables, authenticated grants, RLS policies, private attachments bucket, and storage policies are ready.
 10. Run `npm run check:supabase-sync` to confirm the project is reachable. Anonymous checks probe `profiles`, `devices`, `folders`, `notes`, and `attachments`; they may report `PGRST205` because MarkNote only grants table access to `authenticated`. For release verification, run `npm run check:supabase-sync:oauth`; it opens a browser OAuth login, exchanges the callback for a short-lived access token, checks authenticated table access, inserts/updates/deletes temporary folder/note/attachment rows, and runs an attachment Storage canary that uploads, overwrites, downloads, and deletes a tiny diagnostic object. In CI, set `SUPABASE_ACCESS_TOKEN` to a signed-in user's access token and use `npm run check:supabase-sync:auth` so missing authenticated checks fail instead of being skipped.

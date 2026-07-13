@@ -1,7 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Folder, ImageAttachment, Note, SyncDevice } from '../types';
 import { ATTACHMENT_STORAGE_CANARY_CHECK_NAME, SYNC_TABLE_WRITES_CHECK_NAME } from './backendVerification';
-import { readSyncEnv } from './env';
 import {
   errorWithCauseMessage,
   isSupabaseNameResolutionError,
@@ -34,6 +33,10 @@ const TABLE_CHECKS = [
   { table: NOTES_TABLE, label: 'Notes table' },
   { table: ATTACHMENTS_TABLE, label: 'Attachments table' },
 ];
+
+interface SupabaseSyncAdapterOptions {
+  authRedirectUrl?: string;
+}
 
 interface RemoteFolderRow {
   id: string;
@@ -86,9 +89,16 @@ export class SupabaseSyncAdapter implements RemoteSyncAdapter {
   readonly configured: boolean;
   private readonly client: SupabaseClient | null;
   private readonly url: string | undefined;
+  private readonly authRedirectUrl: string | undefined;
 
-  constructor(url: string | undefined, publishableKey: string | undefined, client?: SupabaseClient) {
+  constructor(
+    url: string | undefined,
+    publishableKey: string | undefined,
+    client?: SupabaseClient,
+    options: SupabaseSyncAdapterOptions = {},
+  ) {
     this.url = url;
+    this.authRedirectUrl = options.authRedirectUrl;
     this.configured = Boolean(url && publishableKey);
     this.client =
       client ??
@@ -131,7 +141,7 @@ export class SupabaseSyncAdapter implements RemoteSyncAdapter {
     const { data, error } = await client.auth.signInWithOAuth({
       provider,
       options: {
-        redirectTo: oauthRedirectUrl(),
+        redirectTo: oauthRedirectUrl(this.authRedirectUrl),
         skipBrowserRedirect: Boolean(window.marknoteDesktop),
       },
     });
@@ -193,7 +203,7 @@ export class SupabaseSyncAdapter implements RemoteSyncAdapter {
           checkItem(
             'Supabase configuration',
             'error',
-            'Supabase sync is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.',
+            'Supabase sync is not configured. Check the sync configuration backend API.',
           ),
         ],
       };
@@ -377,7 +387,7 @@ export class SupabaseSyncAdapter implements RemoteSyncAdapter {
 
   private requireClient(): SupabaseClient {
     if (!this.client) {
-      throw new Error('Supabase sync is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.');
+      throw new Error('Supabase sync is not configured. Check the sync configuration backend API.');
     }
     return this.client;
   }
@@ -520,7 +530,7 @@ async function assertSupabaseProjectReachable(url: string | undefined): Promise<
   try {
     healthUrl = new URL('/auth/v1/health', url);
   } catch {
-    throw new Error('Supabase project URL is invalid. Check VITE_SUPABASE_URL.');
+    throw new Error('Supabase project URL is invalid. Check the sync configuration backend API.');
   }
   if (!healthUrl.hostname.endsWith('.supabase.co')) {
     return;
@@ -533,7 +543,7 @@ async function assertSupabaseProjectReachable(url: string | undefined): Promise<
     });
   } catch (error) {
     if (isSupabaseNameResolutionError(error)) {
-      throw new Error('Supabase project URL cannot be resolved. Check VITE_SUPABASE_URL points to an active project.');
+      throw new Error('Supabase project URL cannot be resolved. Check that the backend API returns an active Supabase project URL.');
     }
   }
 }
@@ -560,7 +570,7 @@ async function checkProjectHealth(url: string | undefined): Promise<SyncBackendC
     return checkItem('Supabase project', 'ok', 'Supabase project is reachable.');
   } catch (error) {
     const message = isSupabaseNameResolutionError(error)
-      ? 'Supabase project URL cannot be resolved. Check VITE_SUPABASE_URL points to an active project.'
+      ? 'Supabase project URL cannot be resolved. Check that the backend API returns an active Supabase project URL.'
       : supabaseProjectReachabilityMessage(error);
     return checkItem('Supabase project', 'error', message);
   }
@@ -772,14 +782,13 @@ function errorMessage(error: unknown): string {
   return errorWithCauseMessage(error);
 }
 
-function oauthRedirectUrl(): string | undefined {
+function oauthRedirectUrl(configuredRedirectUrl?: string): string | undefined {
   if (window.marknoteDesktop) {
     return 'marknote://auth/callback';
   }
 
-  const configured = readSyncEnv('VITE_SUPABASE_AUTH_REDIRECT_URL');
-  if (configured) {
-    return configured;
+  if (configuredRedirectUrl) {
+    return configuredRedirectUrl;
   }
 
   if (typeof window === 'undefined' || !window.location.origin.startsWith('http')) {

@@ -48,13 +48,26 @@ npm run verify:release:local
 
 ### Optional Account Sync
 
-MarkNote is still local-first by default. Account sync is enabled only when Supabase environment variables are present:
+MarkNote is still local-first by default. Account sync is enabled only when a sync configuration backend endpoint is present:
 
 ```bash
 cp .env.example .env.local
 ```
 
-Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`, then apply the SQL in `supabase/migrations/202606190001_marknote_sync_schema.sql` to your Supabase project. You can print the migration for the Supabase SQL Editor with `npm run print:supabase-migration`.
+Set `VITE_SYNC_CONFIG_URL` to your backend endpoint. The distributed app should not contain Supabase project details; the endpoint stores and returns them at runtime:
+
+```json
+{
+  "provider": "supabase",
+  "supabase": {
+    "url": "https://your-project.supabase.co",
+    "publishableKey": "sb_publishable_or_anon_key",
+    "authRedirectUrl": "http://127.0.0.1:5173/?app=1"
+  }
+}
+```
+
+Then apply the SQL in `supabase/migrations/202606190001_marknote_sync_schema.sql` to your Supabase project. You can print the migration for the Supabase SQL Editor with `npm run print:supabase-migration`.
 
 After pasting the migration into the Supabase SQL Editor, you can print a read-only readiness query with `npm run print:supabase-readiness-check` and run it in the same editor. Every row should return `ok = true`; then run `npm run verify:release:online:manual` on this machine.
 
@@ -67,7 +80,7 @@ SUPABASE_MANAGEMENT_TOKEN=sbp_... npm run apply:supabase-migration
 
 `check:supabase-migration` is the schema readiness gate: it lists migration history, checks for the five sync tables, confirms `authenticated` grants, verifies RLS and required policies, verifies the private `attachments` bucket and storage policies, and exits non-zero when the backend is not ready. `apply:supabase-migration` sends the checked-in SQL to the Supabase Management API, then runs the same readiness checks again.
 
-In Google Cloud, create a Web application OAuth client and add your Supabase callback URL as an Authorized redirect URI: `https://<project-ref>.supabase.co/auth/v1/callback`. In Supabase Auth, enable the Google provider and paste that OAuth Client ID and Client Secret. Then add your local and production MarkNote URLs to Supabase Auth redirect URLs, for example `http://127.0.0.1:5173/?app=1`. For CLI OAuth release checks, also allow `http://127.0.0.1:**/auth/callback`; for the packaged desktop app, add `marknote://auth/callback`. If the app is not served from the current browser URL, set `VITE_SUPABASE_AUTH_REDIRECT_URL` explicitly.
+In Google Cloud, create a Web application OAuth client and add your Supabase callback URL as an Authorized redirect URI: `https://<project-ref>.supabase.co/auth/v1/callback`. In Supabase Auth, enable the Google provider and paste that OAuth Client ID and Client Secret. Then add your local and production MarkNote URLs to Supabase Auth redirect URLs, for example `http://127.0.0.1:5173/?app=1`. For CLI OAuth release checks, also allow `http://127.0.0.1:**/auth/callback`; for the packaged desktop app, add `marknote://auth/callback`. If the web app is not served from the current browser URL, return `supabase.authRedirectUrl` from the sync configuration endpoint.
 
 Before testing the button in the app, run:
 
@@ -76,7 +89,7 @@ npm run check:google-oauth
 npm run check:supabase-sync
 ```
 
-This verifies that `VITE_SUPABASE_URL` resolves, Supabase Auth redirects the Google provider flow to Google, and Google accepts the configured OAuth client. A DNS failure means the project URL is wrong, inactive, or not reachable yet. `invalid_client` means the Google OAuth Client ID or Client Secret configured in Supabase Auth does not match a valid Google Cloud Web OAuth client.
+This verifies that the configured Supabase project URL resolves, Supabase Auth redirects the Google provider flow to Google, and Google accepts the configured OAuth client. A DNS failure means the project URL is wrong, inactive, or not reachable yet. `invalid_client` means the Google OAuth Client ID or Client Secret configured in Supabase Auth does not match a valid Google Cloud Web OAuth client.
 
 `check:supabase-sync` verifies the Supabase project is reachable and probes the sync tables, including `profiles`, `devices`, `folders`, `notes`, and `attachments`. MarkNote sync is login-only, so anonymous table probes may report `PGRST205` or permission errors. If you set `SUPABASE_ACCESS_TOKEN` to a signed-in user's access token, the script also verifies authenticated table access, inserts/updates/deletes temporary folder/note/attachment rows, and runs an attachment Storage canary: upload, overwrite, download, and delete.
 
@@ -197,13 +210,26 @@ npm run verify:release:local
 
 ### 可选账号同步
 
-MarkNote 仍然默认本地优先。只有配置 Supabase 环境变量后，账号同步才会启用：
+MarkNote 仍然默认本地优先。只有配置同步配置后端接口后，账号同步才会启用：
 
 ```bash
 cp .env.example .env.local
 ```
 
-设置 `VITE_SUPABASE_URL` 和 `VITE_SUPABASE_PUBLISHABLE_KEY`，然后将 `supabase/migrations/202606190001_marknote_sync_schema.sql` 中的 SQL 应用到 Supabase 项目。可以用 `npm run print:supabase-migration` 打印要粘贴到 Supabase SQL Editor 的迁移 SQL。
+设置 `VITE_SYNC_CONFIG_URL` 指向你的后端接口。分发应用里不应包含 Supabase 项目信息；这些信息由后端接口保存，并在运行时返回：
+
+```json
+{
+  "provider": "supabase",
+  "supabase": {
+    "url": "https://your-project.supabase.co",
+    "publishableKey": "sb_publishable_or_anon_key",
+    "authRedirectUrl": "http://127.0.0.1:5173/?app=1"
+  }
+}
+```
+
+然后将 `supabase/migrations/202606190001_marknote_sync_schema.sql` 中的 SQL 应用到 Supabase 项目。可以用 `npm run print:supabase-migration` 打印要粘贴到 Supabase SQL Editor 的迁移 SQL。
 
 在 Supabase SQL Editor 中粘贴迁移后，可以用 `npm run print:supabase-readiness-check` 打印只读 readiness 查询，并在同一个 SQL Editor 中执行。每一行都应返回 `ok = true`；然后在本机运行 `npm run verify:release:online:manual`。
 
@@ -216,7 +242,7 @@ SUPABASE_MANAGEMENT_TOKEN=sbp_... npm run apply:supabase-migration
 
 `check:supabase-migration` 是 schema readiness gate：它会读取迁移历史，检查五张同步表、`authenticated` grants、RLS 和所需 policies，以及私有 `attachments` bucket 和 Storage policies；后端未就绪时会非零退出。`apply:supabase-migration` 会把仓库里的 SQL 发送到 Supabase Management API，然后再次运行同一组 readiness checks。
 
-在 Google Cloud 中创建 Web application 类型的 OAuth client，并把 Supabase callback URL 加到 Authorized redirect URI：`https://<project-ref>.supabase.co/auth/v1/callback`。然后在 Supabase Auth 中启用 Google provider，填入这个 OAuth Client ID 和 Client Secret。接着把本地和生产 MarkNote URL 加到 Supabase Auth redirect URLs，例如 `http://127.0.0.1:5173/?app=1`。CLI OAuth 发布检查还需要允许 `http://127.0.0.1:**/auth/callback`；如果使用打包后的桌面应用，还要加入 `marknote://auth/callback`。如果应用不是从当前浏览器 URL 提供服务，请显式设置 `VITE_SUPABASE_AUTH_REDIRECT_URL`。
+在 Google Cloud 中创建 Web application 类型的 OAuth client，并把 Supabase callback URL 加到 Authorized redirect URI：`https://<project-ref>.supabase.co/auth/v1/callback`。然后在 Supabase Auth 中启用 Google provider，填入这个 OAuth Client ID 和 Client Secret。接着把本地和生产 MarkNote URL 加到 Supabase Auth redirect URLs，例如 `http://127.0.0.1:5173/?app=1`。CLI OAuth 发布检查还需要允许 `http://127.0.0.1:**/auth/callback`；如果使用打包后的桌面应用，还要加入 `marknote://auth/callback`。如果 Web 应用不是从当前浏览器 URL 提供服务，请从同步配置接口返回 `supabase.authRedirectUrl`。
 
 在应用里点击登录前，先运行：
 
@@ -225,7 +251,7 @@ npm run check:google-oauth
 npm run check:supabase-sync
 ```
 
-它会验证 `VITE_SUPABASE_URL` 是否可解析、Supabase Auth 的 Google provider 是否会跳转到 Google，以及 Google 是否接受当前 OAuth client。这里如果出现 DNS 失败，说明项目 URL 错误、项目未激活，或当前网络还访问不到；如果出现 `invalid_client`，说明 Supabase Auth 中配置的 Google OAuth Client ID 或 Secret 没有对应到有效的 Google Cloud Web OAuth client。
+它会验证已配置的 Supabase 项目 URL 是否可解析、Supabase Auth 的 Google provider 是否会跳转到 Google，以及 Google 是否接受当前 OAuth client。这里如果出现 DNS 失败，说明项目 URL 错误、项目未激活，或当前网络还访问不到；如果出现 `invalid_client`，说明 Supabase Auth 中配置的 Google OAuth Client ID 或 Secret 没有对应到有效的 Google Cloud Web OAuth client。
 
 `check:supabase-sync` 会验证 Supabase 项目可达，并探测 `profiles`、`devices`、`folders`、`notes`、`attachments` 等同步表。MarkNote 同步只面向登录用户，所以匿名探测出现 `PGRST205` 或权限错误可能是正常的；如果把 `SUPABASE_ACCESS_TOKEN` 设置为已登录用户的 access token，脚本还会验证 authenticated 表访问，临时插入/更新/删除 folder/note/attachment 行，以及附件 Storage 的上传、覆盖、下载和删除 canary。
 

@@ -1,25 +1,21 @@
 
 import { lookup } from 'node:dns/promises';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import {
   errorWithCauseMessage,
   oauthEndpointReachabilityMessage,
   supabaseProjectReachabilityMessage,
 } from './supabase-network-diagnostics.mjs';
+import { loadSupabaseRuntimeConfig, readLocalEnv } from './sync-config.mjs';
 
-const env = {
-  ...readEnvFile('.env'),
-  ...readEnvFile('.env.local'),
-  ...process.env,
-};
-
-const supabaseUrl = env.VITE_SUPABASE_URL;
-const redirectTo = env.VITE_SUPABASE_AUTH_REDIRECT_URL || 'http://127.0.0.1:5173/?app=1';
-
-if (!supabaseUrl) {
-  fail('VITE_SUPABASE_URL is missing. Add it to .env.local.');
+const env = readLocalEnv();
+const config = await loadSupabaseRuntimeConfig(env).catch((error) => {
+  fail(errorMessage(error));
+});
+if (config.provider !== 'supabase') {
+  fail('Sync configuration is missing. Set VITE_SYNC_CONFIG_URL to the backend API endpoint.');
 }
+const supabaseUrl = config.supabase.url;
+const redirectTo = config.supabase.authRedirectUrl || 'http://127.0.0.1:5173/?app=1';
 
 let authorizeUrl;
 try {
@@ -27,7 +23,7 @@ try {
   authorizeUrl.searchParams.set('provider', 'google');
   authorizeUrl.searchParams.set('redirect_to', redirectTo);
 } catch (error) {
-  fail(`VITE_SUPABASE_URL is invalid: ${errorMessage(error)}`);
+  fail(`Supabase project URL from sync configuration is invalid: ${errorMessage(error)}`);
 }
 
 console.log(`Checking Google OAuth at ${redactProjectUrl(authorizeUrl)}`);
@@ -41,7 +37,7 @@ try {
     [
       `Could not resolve Supabase project hostname: ${authorizeUrl.hostname}`,
       `DNS error: ${errorMessage(error)}`,
-      'Check that VITE_SUPABASE_URL points to an existing, active Supabase project.',
+      'Check that the sync configuration backend API returns an existing, active Supabase project URL.',
     ].join('\n'),
   );
 }
@@ -75,23 +71,6 @@ fail(
     .filter(Boolean)
     .join('\n'),
 );
-
-function readEnvFile(path) {
-  try {
-    return Object.fromEntries(
-      readFileSync(resolve(path), 'utf8')
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter((line) => line && !line.startsWith('#') && line.includes('='))
-        .map((line) => {
-          const [key, ...valueParts] = line.split('=');
-          return [key, valueParts.join('=').replace(/^["']|["']$/g, '')];
-        }),
-    );
-  } catch {
-    return {};
-  }
-}
 
 function errorMessage(error) {
   return errorWithCauseMessage(error);

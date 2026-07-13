@@ -58,7 +58,7 @@ const translations: Record<Language, TranslationMap> = {
 
     'sync.localOnly': '本地模式',
     'sync.localWorkspace': '本地工作区',
-    'sync.configureHint': '配置 Supabase 环境变量后可登录并同步。',
+    'sync.configureHint': '配置同步配置后端接口后可登录并同步。',
     'sync.account': '账号',
     'sync.ready': '已登录，等待同步',
     'sync.signInRequired': '未登录，点击登录同步',
@@ -353,7 +353,7 @@ const translations: Record<Language, TranslationMap> = {
 
     'sync.localOnly': 'Local only',
     'sync.localWorkspace': 'Local Workspace',
-    'sync.configureHint': 'Set Supabase env vars to sign in and sync.',
+    'sync.configureHint': 'Set the sync configuration backend endpoint to sign in and sync.',
     'sync.account': 'Account',
     'sync.ready': 'Signed in, ready to sync',
     'sync.signInRequired': 'Sign in to sync',

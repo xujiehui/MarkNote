@@ -221,6 +221,16 @@ async function main() {
   assert.equal(webStub.calls[0].options?.redirectTo, 'http://127.0.0.1:5173/?app=1');
   assert.equal(webStub.calls[0].options?.skipBrowserRedirect, false);
 
+  const configuredRedirectStub = createClientStub();
+  const configuredRedirectAdapter = new SupabaseSyncAdapter(
+    'https://example.supabase.co',
+    'sb_publishable_test',
+    configuredRedirectStub.client as never,
+    { authRedirectUrl: 'https://app.example.test/?app=1' },
+  );
+  await configuredRedirectAdapter.signInWithOAuth('google');
+  assert.equal(configuredRedirectStub.calls[0].options?.redirectTo, 'https://app.example.test/?app=1');
+
   const opened: string[] = [];
   window.marknoteDesktop = {
     platform: 'darwin',

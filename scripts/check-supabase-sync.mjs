@@ -1,22 +1,17 @@
 
 import { lookup } from 'node:dns/promises';
 import { createServer } from 'node:http';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { once } from 'node:events';
 import { spawn } from 'node:child_process';
 import { GoTrueClient } from '@supabase/auth-js';
 import { errorWithCauseMessage, supabaseProjectReachabilityMessage } from './supabase-network-diagnostics.mjs';
+import { loadSupabaseRuntimeConfig, readLocalEnv } from './sync-config.mjs';
 
 const TABLES = ['profiles', 'devices', 'folders', 'notes', 'attachments'];
-const env = {
-  ...readEnvFile('.env'),
-  ...readEnvFile('.env.local'),
-  ...process.env,
-};
+const env = readLocalEnv();
 
-const supabaseUrl = env.VITE_SUPABASE_URL;
-const publishableKey = env.VITE_SUPABASE_PUBLISHABLE_KEY;
+let supabaseUrl = '';
+let publishableKey = '';
 const accessToken = env.SUPABASE_ACCESS_TOKEN;
 const oauthLogin = process.argv.includes('--oauth-login') || env.MARKNOTE_SUPABASE_OAUTH_LOGIN === '1';
 const requireAuthenticatedCheck =
@@ -39,17 +34,17 @@ try {
 }
 
 async function main() {
-  if (!supabaseUrl) {
-    throw new CheckFailedError('VITE_SUPABASE_URL is missing. Add it to .env.local.');
+  const config = await loadSupabaseRuntimeConfig(env);
+  if (config.provider !== 'supabase') {
+    throw new CheckFailedError('Sync configuration is missing. Set VITE_SYNC_CONFIG_URL to the backend API endpoint.');
   }
-  if (!publishableKey) {
-    throw new CheckFailedError('VITE_SUPABASE_PUBLISHABLE_KEY is missing. Add it to .env.local.');
-  }
+  supabaseUrl = config.supabase.url;
+  publishableKey = config.supabase.publishableKey;
 
   try {
     projectUrl = new URL(supabaseUrl);
   } catch (error) {
-    throw new CheckFailedError(`VITE_SUPABASE_URL is invalid: ${errorMessage(error)}`);
+    throw new CheckFailedError(`Supabase project URL from sync configuration is invalid: ${errorMessage(error)}`);
   }
 
   console.log(`Checking Supabase sync backend at ${redactProjectUrl(projectUrl)}`);
@@ -62,7 +57,7 @@ async function main() {
       [
         `Could not resolve Supabase project hostname: ${projectUrl.hostname}`,
         `DNS error: ${errorMessage(error)}`,
-        'Check that VITE_SUPABASE_URL points to an existing, active Supabase project.',
+        'Check that the sync configuration backend API returns an existing, active Supabase project URL.',
       ].join('\n'),
     );
   }
@@ -664,23 +659,6 @@ async function probeTable(table, bearerToken) {
       status: 'FETCH_ERROR',
       message: errorMessage(error),
     };
-  }
-}
-
-function readEnvFile(path) {
-  try {
-    return Object.fromEntries(
-      readFileSync(resolve(path), 'utf8')
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter((line) => line && !line.startsWith('#') && line.includes('='))
-        .map((line) => {
-          const [key, ...valueParts] = line.split('=');
-          return [key, valueParts.join('=').replace(/^["']|["']$/g, '')];
-        }),
-    );
-  } catch {
-    return {};
   }
 }
 
