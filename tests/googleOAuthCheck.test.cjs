@@ -6,6 +6,18 @@ const { join } = require('node:path');
 const { tmpdir } = require('node:os');
 
 const tempDir = mkdtempSync(join(tmpdir(), 'marknote-google-oauth-check-'));
+const syncConfigPreloadPath = join(process.cwd(), 'tests/sync-config-preload.cjs');
+const syncConfigEnv = {
+  MARKNOTE_SYNC_CONFIG_URL: 'https://config.example.test/marknote/sync-config',
+  MARKNOTE_TEST_SYNC_CONFIG_JSON: JSON.stringify({
+    provider: 'supabase',
+    supabase: {
+      url: 'https://localhost',
+      publishableKey: 'sb_publishable_test',
+      authRedirectUrl: 'http://127.0.0.1:5173/?app=1',
+    },
+  }),
+};
 
 const successPreloadPath = join(tempDir, 'success-preload.cjs');
 writeFileSync(
@@ -145,13 +157,14 @@ assert.match(invalidClientResult.stderr, /https:\/\/localhost\/auth\/v1\/callbac
 console.log('google oauth check tests passed');
 
 function runCheck(preloadPath) {
-  return spawnSync(process.execPath, ['--require', preloadPath, 'scripts/check-google-oauth.mjs'], {
+  return spawnSync(process.execPath, ['--require', preloadPath, '--require', syncConfigPreloadPath, 'scripts/check-google-oauth.mjs'], {
     cwd: process.cwd(),
     encoding: 'utf8',
     env: {
       ...process.env,
-      VITE_SUPABASE_URL: 'https://localhost',
-      VITE_SUPABASE_AUTH_REDIRECT_URL: 'http://127.0.0.1:5173/?app=1',
+      ...syncConfigEnv,
+      VITE_SUPABASE_URL: '',
+      VITE_SUPABASE_AUTH_REDIRECT_URL: '',
     },
   });
 }

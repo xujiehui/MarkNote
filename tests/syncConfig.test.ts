@@ -16,17 +16,8 @@ function setRuntimeEnv(env: { VITE_SYNC_CONFIG_URL?: string } | undefined): void
   });
 }
 
-function setInjectedConfig(config: unknown): void {
-  Object.defineProperty(globalThis, '__MARKNOTE_SYNC_CONFIG__', {
-    value: config,
-    configurable: true,
-    writable: true,
-  });
-}
-
 async function main() {
   setRuntimeEnv(undefined);
-  setInjectedConfig(undefined);
   resetSyncConfigCacheForTests();
   resetRemoteSyncAdapterForTests();
   assert.equal(hasSyncConfigSource(), false);
@@ -67,28 +58,28 @@ async function main() {
   assert.deepEqual((await loadSyncConfig()).provider, 'supabase');
   assert.equal(fetchCount, 1);
 
-  setRuntimeEnv(undefined);
-  setInjectedConfig({
-    provider: 'supabase',
-    supabaseUrl: 'https://injected.supabase.co',
-    supabasePublishableKey: 'sb_publishable_injected',
-  });
-  resetSyncConfigCacheForTests();
-  assert.deepEqual(await loadSyncConfig(), {
-    provider: 'supabase',
-    supabase: {
-      url: 'https://injected.supabase.co',
-      publishableKey: 'sb_publishable_injected',
+  Object.defineProperty(globalThis, '__MARKNOTE_SYNC_CONFIG__', {
+    value: {
+      provider: 'supabase',
+      supabase: {
+        url: 'https://injected.supabase.co',
+        publishableKey: 'sb_publishable_injected',
+      },
     },
+    configurable: true,
+    writable: true,
   });
-
-  setInjectedConfig({ provider: 'supabase', supabase: { url: 'https://project.supabase.co' } });
+  setRuntimeEnv(undefined);
   resetSyncConfigCacheForTests();
-  await assert.rejects(loadSyncConfig(), /must return Supabase url and publishableKey/);
+  assert.deepEqual(await loadSyncConfig(), { provider: 'disabled' });
 
   globalThis.fetch = originalFetch;
   setRuntimeEnv(undefined);
-  setInjectedConfig(undefined);
+  Object.defineProperty(globalThis, '__MARKNOTE_SYNC_CONFIG__', {
+    value: undefined,
+    configurable: true,
+    writable: true,
+  });
   resetSyncConfigCacheForTests();
   resetRemoteSyncAdapterForTests();
 

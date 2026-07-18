@@ -31,6 +31,8 @@ The backend endpoint stores and returns the Supabase runtime configuration:
 
 The distributed app should only know `VITE_SYNC_CONFIG_URL`. Supabase project URL, publishable key, and redirect override belong to the backend configuration response, not to app-local Vite environment variables.
 
+`VITE_SUPABASE_*` and `MARKNOTE_SUPABASE_*` fallbacks are intentionally unsupported by both the app and CLI verification scripts. The endpoint may return a publishable key because the client needs it at runtime, but it must never return a secret/service-role key. Protect the sync tables and private Storage bucket with Supabase Auth, RLS, grants, and Storage policies.
+
 Optional local verification variables:
 
 ```bash

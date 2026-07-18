@@ -67,6 +67,8 @@ Set `VITE_SYNC_CONFIG_URL` to your backend endpoint. The distributed app should 
 }
 ```
 
+`VITE_SUPABASE_*` and `MARKNOTE_SUPABASE_*` runtime fallbacks are intentionally unsupported. The endpoint must return a publishable key only; never return a Supabase secret/service-role key. Publishable keys are expected to be visible to a client at runtime, so production protection still comes from Supabase Auth, RLS, and Storage policies.
+
 Then apply the SQL in `supabase/migrations/202606190001_marknote_sync_schema.sql` to your Supabase project. You can print the migration for the Supabase SQL Editor with `npm run print:supabase-migration`.
 
 After pasting the migration into the Supabase SQL Editor, you can print a read-only readiness query with `npm run print:supabase-readiness-check` and run it in the same editor. Every row should return `ok = true`; then run `npm run verify:release:online:manual` on this machine.
@@ -228,6 +230,8 @@ cp .env.example .env.local
   }
 }
 ```
+
+`VITE_SUPABASE_*` 和 `MARKNOTE_SUPABASE_*` 本地回退配置已被明确禁用。接口只能返回 publishable key，不能返回 Supabase secret/service-role key。publishable key 在客户端运行时可见是正常的，生产环境仍必须依靠 Supabase Auth、RLS 和 Storage policies 保护数据。
 
 然后将 `supabase/migrations/202606190001_marknote_sync_schema.sql` 中的 SQL 应用到 Supabase 项目。可以用 `npm run print:supabase-migration` 打印要粘贴到 Supabase SQL Editor 的迁移 SQL。
 

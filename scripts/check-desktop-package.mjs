@@ -75,6 +75,7 @@ function main() {
   for (const marker of requiredPreloadMarkers) {
     assertIncludes(packagedPreload, marker.text, marker.label);
   }
+  assertNoEmbeddedSupabaseConfig(packagedRenderer);
   assertIncludes(packagedPackageJson, '"main": "dist-electron/main.js"', 'Electron package main entry');
   assertLocalReleaseScript(sourcePackageJson);
 
@@ -113,6 +114,19 @@ function assertFile(path, message) {
 
 function assertIncludes(value, marker, label) {
   assert(value.includes(marker), `Packaged app is missing ${label} marker (${marker}).`);
+}
+
+function assertNoEmbeddedSupabaseConfig(value) {
+  const forbiddenPatterns = [
+    /(?:VITE|MARKNOTE)_SUPABASE_(?:URL|PUBLISHABLE_KEY|AUTH_REDIRECT_URL)/,
+    /https:\/\/[a-z0-9]{20}\.supabase\.(?:co|in)/i,
+    /sb_publishable_[A-Za-z0-9_-]{16,}/,
+    /sb_secret_[A-Za-z0-9_-]{16,}/,
+  ];
+  assert(
+    forbiddenPatterns.every((pattern) => !pattern.test(value)),
+    'Packaged renderer contains embedded Supabase configuration. The app must load it from the sync backend API.',
+  );
 }
 
 function assertLocalReleaseScript(packageJson) {

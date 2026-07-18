@@ -23,7 +23,7 @@ export function readSyncEnv(name: string): string | undefined {
 }
 
 export function hasSyncConfigSource(): boolean {
-  return Boolean(globalThis.__MARKNOTE_SYNC_CONFIG__ || readSyncEnv('VITE_SYNC_CONFIG_URL'));
+  return Boolean(readSyncEnv('VITE_SYNC_CONFIG_URL')?.trim());
 }
 
 export async function loadSyncConfig(): Promise<SyncRuntimeConfig> {
@@ -41,10 +41,6 @@ export function resetSyncConfigCacheForTests(): void {
 }
 
 async function loadSyncConfigUncached(): Promise<SyncRuntimeConfig> {
-  if (globalThis.__MARKNOTE_SYNC_CONFIG__) {
-    return normalizeSyncConfig(globalThis.__MARKNOTE_SYNC_CONFIG__);
-  }
-
   const endpoint = readSyncEnv('VITE_SYNC_CONFIG_URL')?.trim();
   if (!endpoint) {
     return { provider: 'disabled' };

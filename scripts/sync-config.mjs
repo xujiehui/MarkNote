@@ -9,34 +9,14 @@ export function readLocalEnv() {
   };
 }
 
-export async function loadSupabaseRuntimeConfig(env) {
+export async function loadSupabaseRuntimeConfig(env = {}) {
   const endpoint = (env.MARKNOTE_SYNC_CONFIG_URL || env.VITE_SYNC_CONFIG_URL || '').trim();
-  if (endpoint) {
-    const payload = await fetchSyncConfig(endpoint);
-    return normalizeSyncConfig(payload);
-  }
-
-  const url = (env.MARKNOTE_SUPABASE_URL || env.VITE_SUPABASE_URL || '').trim();
-  const publishableKey = (env.MARKNOTE_SUPABASE_PUBLISHABLE_KEY || env.VITE_SUPABASE_PUBLISHABLE_KEY || '').trim();
-  const authRedirectUrl = (
-    env.MARKNOTE_SUPABASE_AUTH_REDIRECT_URL ||
-    env.VITE_SUPABASE_AUTH_REDIRECT_URL ||
-    ''
-  ).trim();
-  if (!url && !publishableKey) {
+  if (!endpoint) {
     return { provider: 'disabled' };
   }
-  if (!url || !publishableKey) {
-    throw new Error('Supabase runtime config is incomplete. Set VITE_SYNC_CONFIG_URL or provide both Supabase URL and publishable key for local verification.');
-  }
-  return {
-    provider: 'supabase',
-    supabase: {
-      url,
-      publishableKey,
-      ...(authRedirectUrl ? { authRedirectUrl } : {}),
-    },
-  };
+
+  const payload = await fetchSyncConfig(endpoint);
+  return normalizeSyncConfig(payload);
 }
 
 function readEnvFile(path) {
@@ -85,7 +65,7 @@ function normalizeSyncConfig(payload) {
     throw new Error('Sync configuration backend API returned an invalid payload.');
   }
 
-  const provider = stringValue(payload.provider || payload.syncProvider || payload.VITE_SYNC_PROVIDER) || 'supabase';
+  const provider = stringValue(payload.provider || payload.syncProvider) || 'supabase';
   if (provider === 'disabled') {
     return { provider: 'disabled' };
   }
@@ -94,15 +74,14 @@ function normalizeSyncConfig(payload) {
   }
 
   const supabase = isRecord(payload.supabase) ? payload.supabase : payload;
-  const url = stringValue(supabase.url || payload.supabaseUrl || payload.VITE_SUPABASE_URL);
+  const url = stringValue(supabase.url || payload.supabaseUrl);
   const publishableKey = stringValue(
     supabase.publishableKey ||
       supabase.anonKey ||
-      payload.supabasePublishableKey ||
-      payload.VITE_SUPABASE_PUBLISHABLE_KEY,
+      payload.supabasePublishableKey,
   );
   const authRedirectUrl = stringValue(
-    supabase.authRedirectUrl || payload.supabaseAuthRedirectUrl || payload.VITE_SUPABASE_AUTH_REDIRECT_URL,
+    supabase.authRedirectUrl || payload.supabaseAuthRedirectUrl,
   );
 
   if (!url || !publishableKey) {

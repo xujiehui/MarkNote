@@ -6,6 +6,17 @@ const { join } = require('node:path');
 const { tmpdir } = require('node:os');
 
 const tempDir = mkdtempSync(join(tmpdir(), 'marknote-sync-check-'));
+const syncConfigPreloadPath = join(process.cwd(), 'tests/sync-config-preload.cjs');
+const syncConfigEnv = {
+  MARKNOTE_SYNC_CONFIG_URL: 'https://config.example.test/marknote/sync-config',
+  MARKNOTE_TEST_SYNC_CONFIG_JSON: JSON.stringify({
+    provider: 'supabase',
+    supabase: {
+      url: 'https://localhost',
+      publishableKey: 'sb_publishable_test',
+    },
+  }),
+};
 const userId = '00000000-0000-4000-8000-000000000123';
 const token = jwtWithSub(userId);
 const preloadPath = join(tempDir, 'preload.cjs');
@@ -184,7 +195,7 @@ function textResponse(status, body) {
 `,
 );
 
-const result = spawnSync(process.execPath, ['--require', preloadPath, 'scripts/check-supabase-sync.mjs'], {
+const result = spawnSyncWithBackendConfig(['--require', preloadPath, 'scripts/check-supabase-sync.mjs'], {
   cwd: process.cwd(),
   encoding: 'utf8',
   env: {
@@ -201,7 +212,7 @@ assert.ok(result.stdout.includes(`Attachments bucket list: ok (${userId}/ prefix
 assert.ok(result.stdout.includes('Sync table writes: ok'), result.stdout);
 assert.ok(result.stdout.includes('Attachment storage canary: ok'), result.stdout);
 
-const oauthResult = spawnSync(process.execPath, ['--require', oauthPreloadPath, 'scripts/check-supabase-sync.mjs', '--oauth-login', '--require-auth'], {
+const oauthResult = spawnSyncWithBackendConfig(['--require', oauthPreloadPath, 'scripts/check-supabase-sync.mjs', '--oauth-login', '--require-auth'], {
   cwd: process.cwd(),
   encoding: 'utf8',
   env: {
@@ -219,7 +230,7 @@ assert.match(oauthResult.stdout, /OAuth login: signed in as oauth@example.com/);
 assert.match(oauthResult.stdout, /Sync table writes: ok/);
 assert.match(oauthResult.stdout, /Attachment storage canary: ok/);
 
-const skippedAuthResult = spawnSync(process.execPath, ['--require', preloadPath, 'scripts/check-supabase-sync.mjs'], {
+const skippedAuthResult = spawnSyncWithBackendConfig(['--require', preloadPath, 'scripts/check-supabase-sync.mjs'], {
   cwd: process.cwd(),
   encoding: 'utf8',
   env: {
@@ -255,7 +266,7 @@ globalThis.fetch = async (input) => {
 };
 `,
 );
-const fetchCauseResult = spawnSync(process.execPath, ['--require', fetchCausePreloadPath, 'scripts/check-supabase-sync.mjs'], {
+const fetchCauseResult = spawnSyncWithBackendConfig(['--require', fetchCausePreloadPath, 'scripts/check-supabase-sync.mjs'], {
   cwd: process.cwd(),
   encoding: 'utf8',
   env: {
@@ -300,7 +311,7 @@ function jsonResponse(status, body) {
 `,
 );
 
-const schemaCacheResult = spawnSync(process.execPath, ['--require', schemaCachePreloadPath, 'scripts/check-supabase-sync.mjs'], {
+const schemaCacheResult = spawnSyncWithBackendConfig(['--require', schemaCachePreloadPath, 'scripts/check-supabase-sync.mjs'], {
   cwd: process.cwd(),
   encoding: 'utf8',
   env: {
@@ -318,7 +329,7 @@ assert.match(schemaCacheResult.stderr, /npm run apply:supabase-migration/);
 assert.match(schemaCacheResult.stderr, /npm run print:supabase-migration/);
 assert.match(schemaCacheResult.stderr, /npm run verify:release:online:manual/);
 
-const missingAuthResult = spawnSync(process.execPath, ['--require', preloadPath, 'scripts/check-supabase-sync.mjs', '--require-auth'], {
+const missingAuthResult = spawnSyncWithBackendConfig(['--require', preloadPath, 'scripts/check-supabase-sync.mjs', '--require-auth'], {
   cwd: process.cwd(),
   encoding: 'utf8',
   env: {
@@ -334,7 +345,7 @@ assert.match(missingAuthResult.stderr, /SUPABASE_ACCESS_TOKEN is missing/);
 assert.match(missingAuthResult.stderr, /check:supabase-sync:oauth/);
 assert.match(missingAuthResult.stderr, /Diagnose sync/);
 
-const envRequireAuthResult = spawnSync(process.execPath, ['--require', preloadPath, 'scripts/check-supabase-sync.mjs'], {
+const envRequireAuthResult = spawnSyncWithBackendConfig(['--require', preloadPath, 'scripts/check-supabase-sync.mjs'], {
   cwd: process.cwd(),
   encoding: 'utf8',
   env: {
@@ -396,7 +407,7 @@ function jsonResponse(status, body) {
 `,
 );
 
-const failingResult = spawnSync(process.execPath, ['--require', failingPreloadPath, 'scripts/check-supabase-sync.mjs'], {
+const failingResult = spawnSyncWithBackendConfig(['--require', failingPreloadPath, 'scripts/check-supabase-sync.mjs'], {
   cwd: process.cwd(),
   encoding: 'utf8',
   env: {
@@ -436,7 +447,7 @@ function jsonResponse(status, body) {
 `,
 );
 
-const invalidTokenResult = spawnSync(process.execPath, ['--require', invalidTokenPreloadPath, 'scripts/check-supabase-sync.mjs'], {
+const invalidTokenResult = spawnSyncWithBackendConfig(['--require', invalidTokenPreloadPath, 'scripts/check-supabase-sync.mjs'], {
   cwd: process.cwd(),
   encoding: 'utf8',
   env: {
@@ -492,7 +503,7 @@ function jsonResponse(status, body) {
 `,
 );
 
-const deleteFailResult = spawnSync(process.execPath, ['--require', deleteFailPreloadPath, 'scripts/check-supabase-sync.mjs'], {
+const deleteFailResult = spawnSyncWithBackendConfig(['--require', deleteFailPreloadPath, 'scripts/check-supabase-sync.mjs'], {
   cwd: process.cwd(),
   encoding: 'utf8',
   env: {
@@ -547,7 +558,7 @@ function jsonResponse(status, body) {
 `,
 );
 
-const leftoverResult = spawnSync(process.execPath, ['--require', leftoverPreloadPath, 'scripts/check-supabase-sync.mjs'], {
+const leftoverResult = spawnSyncWithBackendConfig(['--require', leftoverPreloadPath, 'scripts/check-supabase-sync.mjs'], {
   cwd: process.cwd(),
   encoding: 'utf8',
   env: {
@@ -621,7 +632,7 @@ function textResponse(status, body) {
 `,
 );
 
-const storageLeftoverResult = spawnSync(process.execPath, ['--require', storageLeftoverPreloadPath, 'scripts/check-supabase-sync.mjs'], {
+const storageLeftoverResult = spawnSyncWithBackendConfig(['--require', storageLeftoverPreloadPath, 'scripts/check-supabase-sync.mjs'], {
   cwd: process.cwd(),
   encoding: 'utf8',
   env: {
@@ -637,6 +648,33 @@ assert.match(storageLeftoverResult.stderr, /Attachment storage delete returned s
 assert.doesNotMatch(storageLeftoverResult.stdout, /Attachment storage canary: ok/);
 
 console.log('supabase sync check tests passed');
+
+function spawnSyncWithBackendConfig(args, options) {
+  const scriptIndex = args.findIndex((arg) => arg.endsWith('.mjs'));
+  return spawnSync(
+    process.execPath,
+    [
+      ...args.slice(0, scriptIndex),
+      '--require',
+      syncConfigPreloadPath,
+      ...args.slice(scriptIndex),
+    ],
+    {
+      ...options,
+      env: {
+        ...process.env,
+        ...syncConfigEnv,
+        ...options.env,
+        MARKNOTE_SUPABASE_URL: '',
+        MARKNOTE_SUPABASE_PUBLISHABLE_KEY: '',
+        MARKNOTE_SUPABASE_AUTH_REDIRECT_URL: '',
+        VITE_SUPABASE_URL: '',
+        VITE_SUPABASE_PUBLISHABLE_KEY: '',
+        VITE_SUPABASE_AUTH_REDIRECT_URL: '',
+      },
+    },
+  );
+}
 
 function jwtWithSub(sub) {
   return ['header', JSON.stringify({ sub }), 'signature'].map(base64Url).join('.');

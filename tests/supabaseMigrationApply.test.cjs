@@ -6,6 +6,17 @@ const { join } = require('node:path');
 const { tmpdir } = require('node:os');
 
 const tempDir = mkdtempSync(join(tmpdir(), 'marknote-supabase-apply-'));
+const syncConfigPreloadPath = join(process.cwd(), 'tests/sync-config-preload.cjs');
+const syncConfigEnv = {
+  MARKNOTE_SYNC_CONFIG_URL: 'https://config.example.test/marknote/sync-config',
+  MARKNOTE_TEST_SYNC_CONFIG_JSON: JSON.stringify({
+    provider: 'supabase',
+    supabase: {
+      url: 'https://projectref.supabase.co',
+      publishableKey: 'sb_publishable_test',
+    },
+  }),
+};
 const expectedTables = ['profiles', 'devices', 'folders', 'notes', 'attachments'];
 const expectedTableRows = expectedTables.map((table_name) => ({ table_name }));
 const expectedGrantRows = expectedTables.flatMap((table_name) =>
@@ -208,11 +219,15 @@ assert.match(missingPolicyResult.stdout, /Public policies: missing notes:Users c
 assert.match(missingPolicyResult.stdout, /Storage policies: missing Users can delete own attachment objects/);
 assert.match(missingPolicyResult.stderr, /Supabase sync schema is not ready/);
 
-const missingTokenResult = spawnSync(process.execPath, ['scripts/apply-supabase-migration.mjs'], {
+const missingTokenResult = spawnSync(process.execPath, ['--require', syncConfigPreloadPath, 'scripts/apply-supabase-migration.mjs'], {
   cwd: process.cwd(),
   encoding: 'utf8',
   env: {
-    VITE_SUPABASE_URL: 'https://projectref.supabase.co',
+    ...syncConfigEnv,
+    MARKNOTE_SUPABASE_URL: '',
+    MARKNOTE_SUPABASE_PUBLISHABLE_KEY: '',
+    VITE_SUPABASE_URL: '',
+    VITE_SUPABASE_PUBLISHABLE_KEY: '',
     SUPABASE_MANAGEMENT_TOKEN: '',
     SUPABASE_API_ACCESS_TOKEN: '',
     SUPABASE_PAT: '',
@@ -224,12 +239,22 @@ assert.match(missingTokenResult.stderr, /SUPABASE_MANAGEMENT_TOKEN is missing/);
 console.log('supabase migration apply tests passed');
 
 function runScript(args) {
-  return spawnSync(process.execPath, args, {
+  const scriptIndex = args.findIndex((arg) => arg.endsWith('.mjs'));
+  return spawnSync(process.execPath, [
+    ...args.slice(0, scriptIndex),
+    '--require',
+    syncConfigPreloadPath,
+    ...args.slice(scriptIndex),
+  ], {
     cwd: process.cwd(),
     encoding: 'utf8',
     env: {
       ...process.env,
-      VITE_SUPABASE_URL: 'https://projectref.supabase.co',
+      ...syncConfigEnv,
+      MARKNOTE_SUPABASE_URL: '',
+      MARKNOTE_SUPABASE_PUBLISHABLE_KEY: '',
+      VITE_SUPABASE_URL: '',
+      VITE_SUPABASE_PUBLISHABLE_KEY: '',
       SUPABASE_PROJECT_REF: '',
       SUPABASE_MANAGEMENT_TOKEN: 'management-token',
       SUPABASE_API_ACCESS_TOKEN: '',
