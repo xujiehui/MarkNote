@@ -48,6 +48,7 @@ function createClientStub(options: ClientStubOptions = {}) {
   const storageUploads: Array<{ bucket: string; path: string; upsert?: boolean }> = [];
   const storageRemoves: Array<{ bucket: string; paths: string[] }> = [];
   const storageDownloads: Array<{ bucket: string; path: string }> = [];
+  const storagePaths = new Set<string>();
   const removedStoragePaths = new Set<string>();
   const client = {
     auth: {
@@ -162,11 +163,19 @@ function createClientStub(options: ClientStubOptions = {}) {
         return {
           async list(path: string, listOptions?: { limit?: number }) {
             storageLists.push({ bucket, path, limit: listOptions?.limit });
-            return { data: [], error: options.storageError || null };
+            const search = (listOptions as { search?: string } | undefined)?.search;
+            const data = [...storagePaths]
+              .filter((storagePath) => storagePath.startsWith(`${path}/`))
+              .filter((storagePath) => !search || storagePath.endsWith(search))
+              .map((storagePath) => ({ name: storagePath.slice(storagePath.lastIndexOf('/') + 1) }));
+            return { data, error: options.storageError || null };
           },
           async upload(path: string, _body: Blob, uploadOptions?: { upsert?: boolean }) {
             void _body;
             storageUploads.push({ bucket, path, upsert: uploadOptions?.upsert });
+            if (!options.storageError) {
+              storagePaths.add(path);
+            }
             return { data: null, error: options.storageError || null };
           },
           async remove(paths: string[]) {
@@ -174,6 +183,7 @@ function createClientStub(options: ClientStubOptions = {}) {
             if (!options.storageDeleteLeavesObject && !options.storageError && !options.storageRemoveError) {
               for (const path of paths) {
                 removedStoragePaths.add(path);
+                storagePaths.delete(path);
               }
             }
             return { data: [], error: options.storageRemoveError || options.storageError || null };
@@ -456,6 +466,7 @@ async function main() {
   const storageLeftoverItem = storageLeftoverCheck.items.find((item) => item.name === 'Attachment storage delete');
   assert.match(storageLeftoverItem?.message || '', /still downloadable/);
   assert.equal(storageLeftoverStub.storageDownloads.length, 2);
+  assert.equal(storageLeftoverStub.storageLists.length, 2);
   assert.equal(storageLeftoverStub.storageRemoves.length, 2);
 
   const pullStub = createClientStub({

@@ -34,6 +34,7 @@ concurrency:
 
 env:
   NODE_VERSION: '22.12.0'
+  VITE_SYNC_CONFIG_URL: ${{ vars.MARKNOTE_SYNC_CONFIG_URL }}
 
 jobs:
   quality:
@@ -121,6 +122,11 @@ jobs:
           npm --version
           uname -a || true
           node -p "process.platform + ' ' + process.arch"
+          if [ -n "${VITE_SYNC_CONFIG_URL:-}" ]; then
+            echo "Sync configuration source: configured"
+          else
+            echo "Sync configuration source: not configured (local-only artifact)"
+          fi
 
       - name: Build renderer and Electron main process
         if: env.SHOULD_BUILD == 'true'

@@ -753,8 +753,31 @@ async function checkAttachmentStorageCanary(client: SupabaseClient, userId: stri
       return storageCanaryError(remove.error, 'Attachment storage delete');
     }
 
-    const deletedDownload = await bucket.download(path);
+    const deletedDownload = await bucket.download(
+      path,
+      { cacheNonce: `${Date.now()}-${Math.random().toString(36).slice(2)}` },
+      { cache: 'no-store' },
+    );
+    if (deletedDownload.error && !isSupabaseStorageObjectMissingError(deletedDownload.error)) {
+      return storageCanaryError(deletedDownload.error, 'Attachment storage delete verification');
+    }
     if (!deletedDownload.error && deletedDownload.data) {
+      const deletionCheck = await bucket.list(storagePathDirectory(path), {
+        limit: 1,
+        search: storagePathFilename(path),
+      });
+      if (deletionCheck.error) {
+        return storageCanaryError(deletionCheck.error, 'Attachment storage delete verification');
+      }
+      const objectStillListed = (deletionCheck.data || []).some((entry) => entry.name === storagePathFilename(path));
+      if (!objectStillListed) {
+        shouldCleanup = false;
+        return checkItem(
+          ATTACHMENT_STORAGE_CANARY_CHECK_NAME,
+          'ok',
+          'Attachment storage can upload, overwrite, download, and delete files for the signed-in user.',
+        );
+      }
       return storageCanaryError(
         new Error('Diagnostic object is still downloadable after delete.'),
         'Attachment storage delete',
@@ -776,6 +799,16 @@ async function checkAttachmentStorageCanary(client: SupabaseClient, userId: stri
 
 function storageCanaryError(error: unknown, resource: string): SyncBackendCheckItem {
   return checkItem(resource, 'error', supabaseBackendErrorMessage(error, resource), supabaseErrorCode(error));
+}
+
+function storagePathDirectory(path: string): string {
+  const separator = path.lastIndexOf('/');
+  return separator >= 0 ? path.slice(0, separator) : '';
+}
+
+function storagePathFilename(path: string): string {
+  const separator = path.lastIndexOf('/');
+  return separator >= 0 ? path.slice(separator + 1) : path;
 }
 
 function errorMessage(error: unknown): string {

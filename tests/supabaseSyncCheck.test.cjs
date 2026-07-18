@@ -596,7 +596,8 @@ globalThis.fetch = async (input, init = {}) => {
     }
   }
   if (url.includes('/storage/v1/object/list/attachments')) {
-    return jsonResponse(200, []);
+    const body = JSON.parse(init.body || '{}');
+    return jsonResponse(200, body.search && process.env.MARKNOTE_STORAGE_LIST_HAS_OBJECT === '1' ? [{ name: body.search }] : []);
   }
   if (url.includes('/storage/v1/object/attachments/') && method === 'POST') {
     assert.equal(url.includes('/${userId}/.marknote-diagnostics/'), true);
@@ -643,9 +644,24 @@ const storageLeftoverResult = spawnSyncWithBackendConfig(['--require', storageLe
   },
 });
 
-assert.notEqual(storageLeftoverResult.status, 0, `${storageLeftoverResult.stdout}\n${storageLeftoverResult.stderr}`);
-assert.match(storageLeftoverResult.stderr, /Attachment storage delete returned success, but the diagnostic object is still downloadable/);
-assert.doesNotMatch(storageLeftoverResult.stdout, /Attachment storage canary: ok/);
+assert.equal(storageLeftoverResult.status, 0, `${storageLeftoverResult.stdout}\n${storageLeftoverResult.stderr}`);
+assert.match(storageLeftoverResult.stdout, /Attachment storage canary: ok/);
+
+const storageStillListedResult = spawnSyncWithBackendConfig(['--require', storageLeftoverPreloadPath, 'scripts/check-supabase-sync.mjs'], {
+  cwd: process.cwd(),
+  encoding: 'utf8',
+  env: {
+    ...process.env,
+    MARKNOTE_STORAGE_LIST_HAS_OBJECT: '1',
+    VITE_SUPABASE_URL: 'https://localhost',
+    VITE_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_test',
+    SUPABASE_ACCESS_TOKEN: token,
+  },
+});
+
+assert.notEqual(storageStillListedResult.status, 0, `${storageStillListedResult.stdout}\n${storageStillListedResult.stderr}`);
+assert.match(storageStillListedResult.stderr, /Attachment storage delete returned success, but the diagnostic object is still listed/);
+assert.doesNotMatch(storageStillListedResult.stdout, /Attachment storage canary: ok/);
 
 console.log('supabase sync check tests passed');
 

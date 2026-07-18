@@ -233,6 +233,8 @@ cp .env.example .env.local
 
 `VITE_SUPABASE_*` 和 `MARKNOTE_SUPABASE_*` 本地回退配置已被明确禁用。接口只能返回 publishable key，不能返回 Supabase secret/service-role key。publishable key 在客户端运行时可见是正常的，生产环境仍必须依靠 Supabase Auth、RLS 和 Storage policies 保护数据。
 
+GitHub Actions 不读取构建机上的 `.env.local`。要让 macOS/Windows 分发产物启用云同步，请在仓库的 Actions Variables 中设置 `MARKNOTE_SYNC_CONFIG_URL`；工作流会把它作为 `VITE_SYNC_CONFIG_URL` 传给 Vite。未设置时构建仍会成功，但产物明确运行在本地模式。
+
 然后将 `supabase/migrations/202606190001_marknote_sync_schema.sql` 中的 SQL 应用到 Supabase 项目。可以用 `npm run print:supabase-migration` 打印要粘贴到 Supabase SQL Editor 的迁移 SQL。
 
 在 Supabase SQL Editor 中粘贴迁移后，可以用 `npm run print:supabase-readiness-check` 打印只读 readiness 查询，并在同一个 SQL Editor 中执行。每一行都应返回 `ok = true`；然后在本机运行 `npm run verify:release:online:manual`。

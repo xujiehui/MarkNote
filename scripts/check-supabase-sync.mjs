@@ -562,14 +562,37 @@ async function checkStorageCanary(bearerToken, userId) {
 
     const deletedDownload = await storageRequest({
       method: 'GET',
-      path: `/storage/v1/object/authenticated/attachments/${encodeStoragePath(canaryPath)}`,
+      path: `/storage/v1/object/authenticated/attachments/${encodeStoragePath(canaryPath)}?cacheNonce=${Date.now()}`,
       bearerToken,
     });
     if (deletedDownload.status === 'FETCH_ERROR') {
       throw storageError('Attachment storage delete verification', deletedDownload);
     }
+    if (!isStorageObjectMissingResponse(deletedDownload) && !deletedDownload.ok) {
+      throw storageError('Attachment storage delete verification', deletedDownload);
+    }
     if (deletedDownload.ok) {
-      throw new CheckFailedError('Attachment storage delete returned success, but the diagnostic object is still downloadable.');
+      const deletionCheck = await storageRequest({
+        method: 'POST',
+        path: '/storage/v1/object/list/attachments',
+        bearerToken,
+        body: JSON.stringify({
+          limit: 1,
+          prefix: storagePathDirectory(canaryPath),
+          search: storagePathFilename(canaryPath),
+        }),
+      });
+      if (!deletionCheck.ok) {
+        throw storageError('Attachment storage delete verification', deletionCheck);
+      }
+      const objectStillListed = Array.isArray(deletionCheck.body)
+        && deletionCheck.body.some((entry) => entry?.name === storagePathFilename(canaryPath));
+      if (!objectStillListed) {
+        shouldCleanup = false;
+        console.log('Attachment storage canary: ok (upload, overwrite, download, delete)');
+        return;
+      }
+      throw new CheckFailedError('Attachment storage delete returned success, but the diagnostic object is still listed.');
     }
 
     shouldCleanup = false;
@@ -588,6 +611,23 @@ async function deleteStorageObject(bearerToken, objectPath) {
     bearerToken,
     body: JSON.stringify({ prefixes: [objectPath] }),
   });
+}
+
+function isStorageObjectMissingResponse(response) {
+  return response.status === 404
+    || response.body?.code === '404'
+    || response.body?.code === 'NoSuchKey'
+    || /(?:object|key|file).*(?:not found|missing|does not exist)|(?:not found|missing|does not exist).*(?:object|key|file)/i.test(response.body?.message || '');
+}
+
+function storagePathDirectory(path) {
+  const separator = path.lastIndexOf('/');
+  return separator >= 0 ? path.slice(0, separator) : '';
+}
+
+function storagePathFilename(path) {
+  const separator = path.lastIndexOf('/');
+  return separator >= 0 ? path.slice(separator + 1) : path;
 }
 
 async function storageRequest({ method, path, bearerToken, body, contentType = 'application/json', headers = {} }) {
