@@ -69,7 +69,12 @@ Set `VITE_SYNC_CONFIG_URL` to your backend endpoint. The distributed app should 
 
 `VITE_SUPABASE_*` and `MARKNOTE_SUPABASE_*` runtime fallbacks are intentionally unsupported. The endpoint must return a publishable key only; never return a Supabase secret/service-role key. Publishable keys are expected to be visible to a client at runtime, so production protection still comes from Supabase Auth, RLS, and Storage policies.
 
+The current MarkNote project uses a public Supabase Storage object as that backend endpoint:
+`https://wgagahicbbmqbqttedjy.supabase.co/storage/v1/object/public/marknote-config/sync-config.json`.
+Apply the `marknote-config` bucket migration, upload the JSON response above as `sync-config.json`, and set the same URL as the GitHub Actions repository variable `MARKNOTE_SYNC_CONFIG_URL`. The object must contain only the Supabase URL and publishable key; never upload a secret or service-role key. The bucket is public for reads, while uploads remain a privileged deployment operation.
+
 Then apply the SQL in `supabase/migrations/202606190001_marknote_sync_schema.sql` to your Supabase project. You can print the migration for the Supabase SQL Editor with `npm run print:supabase-migration`.
+Also apply `supabase/migrations/202607180003_marknote_sync_config_bucket.sql` before uploading `sync-config.json`.
 
 After pasting the migration into the Supabase SQL Editor, you can print a read-only readiness query with `npm run print:supabase-readiness-check` and run it in the same editor. Every row should return `ok = true`; then run `npm run verify:release:online:manual` on this machine.
 
@@ -233,9 +238,14 @@ cp .env.example .env.local
 
 `VITE_SUPABASE_*` 和 `MARKNOTE_SUPABASE_*` 本地回退配置已被明确禁用。接口只能返回 publishable key，不能返回 Supabase secret/service-role key。publishable key 在客户端运行时可见是正常的，生产环境仍必须依靠 Supabase Auth、RLS 和 Storage policies 保护数据。
 
+当前正确的 MarkNote 项目使用 Supabase Storage 公共 JSON 对象作为这个后端接口：
+`https://wgagahicbbmqbqttedjy.supabase.co/storage/v1/object/public/marknote-config/sync-config.json`。
+先应用 `marknote-config` bucket 迁移，再将上面的 JSON 作为 `sync-config.json` 上传，并把同一个 URL 设置为 GitHub Actions 仓库变量 `MARKNOTE_SYNC_CONFIG_URL`。对象只能包含 Supabase URL 和 publishable key，不能上传 secret 或 service-role key。bucket 只公开读取，上传仍是受保护的部署操作。
+
 GitHub Actions 不读取构建机上的 `.env.local`。要让 macOS/Windows 分发产物启用云同步，请在仓库的 Actions Variables 中设置 `MARKNOTE_SYNC_CONFIG_URL`；工作流会把它作为 `VITE_SYNC_CONFIG_URL` 传给 Vite。未设置时构建仍会成功，但产物明确运行在本地模式。
 
 然后将 `supabase/migrations/202606190001_marknote_sync_schema.sql` 中的 SQL 应用到 Supabase 项目。可以用 `npm run print:supabase-migration` 打印要粘贴到 Supabase SQL Editor 的迁移 SQL。
+同时应用 `supabase/migrations/202607180003_marknote_sync_config_bucket.sql`，再上传 `sync-config.json`。
 
 在 Supabase SQL Editor 中粘贴迁移后，可以用 `npm run print:supabase-readiness-check` 打印只读 readiness 查询，并在同一个 SQL Editor 中执行。每一行都应返回 `ok = true`；然后在本机运行 `npm run verify:release:online:manual`。
 

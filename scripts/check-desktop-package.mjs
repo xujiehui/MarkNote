@@ -2,6 +2,7 @@
 import { createRequire } from 'node:module';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { readLocalEnv } from './sync-config.mjs';
 
 const require = createRequire(import.meta.url);
 const asar = require('@electron/asar');
@@ -75,7 +76,9 @@ function main() {
   for (const marker of requiredPreloadMarkers) {
     assertIncludes(packagedPreload, marker.text, marker.label);
   }
-  assertNoEmbeddedSupabaseConfig(packagedRenderer);
+  const localEnv = readLocalEnv();
+  const configuredEndpoint = (localEnv.MARKNOTE_SYNC_CONFIG_URL || localEnv.VITE_SYNC_CONFIG_URL || '').trim();
+  assertNoEmbeddedSupabaseConfig(packagedRenderer, configuredEndpoint);
   assertIncludes(packagedPackageJson, '"main": "dist-electron/main.js"', 'Electron package main entry');
   assertLocalReleaseScript(sourcePackageJson);
 
@@ -116,16 +119,22 @@ function assertIncludes(value, marker, label) {
   assert(value.includes(marker), `Packaged app is missing ${label} marker (${marker}).`);
 }
 
-function assertNoEmbeddedSupabaseConfig(value) {
+function assertNoEmbeddedSupabaseConfig(value, endpoint) {
   const forbiddenPatterns = [
     /(?:VITE|MARKNOTE)_SUPABASE_(?:URL|PUBLISHABLE_KEY|AUTH_REDIRECT_URL)/,
-    /https:\/\/[a-z0-9]{20}\.supabase\.(?:co|in)/i,
     /sb_publishable_[A-Za-z0-9_-]{16,}/,
     /sb_secret_[A-Za-z0-9_-]{16,}/,
   ];
   assert(
     forbiddenPatterns.every((pattern) => !pattern.test(value)),
     'Packaged renderer contains embedded Supabase configuration. The app must load it from the sync backend API.',
+  );
+  const supabaseProjectUrlPattern = /https:\/\/[a-z0-9]{20}\.supabase\.(?:co|in)/gi;
+  assert(
+    [...value.matchAll(supabaseProjectUrlPattern)].every(({ index }) =>
+      endpoint && index !== undefined && value.slice(index, index + endpoint.length) === endpoint,
+    ),
+    'Packaged renderer contains an unapproved Supabase project URL. Only the configured sync backend endpoint may be embedded.',
   );
 }
 

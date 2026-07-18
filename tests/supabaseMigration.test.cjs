@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 
 const sql = readFileSync('supabase/migrations/202606190001_marknote_sync_schema.sql', 'utf8');
+const configSql = readFileSync('supabase/migrations/202607180003_marknote_sync_config_bucket.sql', 'utf8');
 
 assert.match(sql, /grant select, insert, update, delete on table public\.notes to authenticated;/i);
 assert.match(sql, /alter table public\.notes enable row level security;/i);
@@ -20,5 +21,8 @@ assert.match(sql, /grant select, insert, update, delete on table storage\.object
 assert.match(sql, /create policy "Users can update own attachment objects"[\s\S]*for update[\s\S]*using[\s\S]*with check/i);
 assert.match(sql, /create policy "Users can delete own attachment objects"[\s\S]*for delete[\s\S]*using/i);
 assert.match(sql, /notify pgrst, 'reload schema';/i);
+assert.match(configSql, /insert into storage\.buckets \(id, name, public\)[\s\S]*values \('marknote-config', 'marknote-config', true\)/i);
+assert.match(configSql, /on conflict \(id\) do update set public = true;/i);
+assert.doesNotMatch(configSql, /sb_(?:publishable|secret)_/i);
 
 console.log('supabase migration tests passed');

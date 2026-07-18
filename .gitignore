@@ -9,4 +9,5 @@ release
 .env
 .env.*
 !.env.example
+.marknote-sync-config.tmp.json
 /index-*.js
