@@ -11,5 +11,9 @@ assert.match(
 );
 assert.match(workflow, /- name: Verify Pages cloud sync and OAuth\s+run: npm run check:google-oauth/);
 assert.match(workflow, /- name: Build site\s+run: npm run build/);
+assert.match(workflow, /page_url: \$\{\{ steps\.deployment\.outputs\.page_url \}\}/);
+assert.match(workflow, /name: Verify deployed cloud sync/);
+assert.match(workflow, /MARKNOTE_PAGES_URL: \$\{\{ needs\.deploy\.outputs\.page_url \}\}\?app=1/);
+assert.match(workflow, /run: npm run check:pages-deployment/);
 
 console.log('pages workflow tests passed');

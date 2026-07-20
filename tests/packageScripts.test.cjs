@@ -6,6 +6,7 @@ const packageJson = JSON.parse(readFileSync('package.json', 'utf8'));
 const scripts = packageJson.scripts || {};
 
 assert.equal(scripts['check:google-oauth'], 'node scripts/check-google-oauth.mjs');
+assert.equal(scripts['check:pages-deployment'], 'node scripts/check-pages-deployment.mjs');
 assert.equal(scripts['check:supabase-sync:oauth'], 'node scripts/check-supabase-sync.mjs --oauth-login --require-auth');
 assert.equal(scripts['check:supabase-migration'], 'node scripts/apply-supabase-migration.mjs');
 assert.equal(scripts['apply:supabase-migration'], 'node scripts/apply-supabase-migration.mjs --apply');
