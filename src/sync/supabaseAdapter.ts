@@ -830,6 +830,7 @@ function oauthRedirectUrl(configuredRedirectUrl?: string): string | undefined {
 
   const url = new URL(window.location.href);
   url.hash = '';
+  url.search = '';
   url.searchParams.set('app', '1');
   return url.toString();
 }

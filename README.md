@@ -73,7 +73,7 @@ The current MarkNote project uses a public Supabase Storage object as that backe
 `https://wgagahicbbmqbqttedjy.supabase.co/storage/v1/object/public/marknote-config/sync-config.json`.
 Apply the `marknote-config` bucket migration, upload the JSON response above as `sync-config.json`, and set the same URL as the GitHub Actions repository variable `MARKNOTE_SYNC_CONFIG_URL`. The object must contain only the Supabase URL and publishable key; never upload a secret or service-role key. The bucket is public for reads, while uploads remain a privileged deployment operation.
 
-The GitHub Pages workflow requires that repository variable and verifies Google OAuth with `https://xujiehui.github.io/MarkNote/?app=1` as the web redirect. A Pages build fails instead of publishing a local-only bundle when the variable is missing or the endpoint is absent from the generated assets. After deployment, `check:pages-deployment` downloads the live site and verifies the endpoint, CORS response, runtime payload, absence of embedded keys, and enabled Google Auth provider. Add that exact Pages URL to Supabase Auth redirect URLs.
+The GitHub Pages workflow requires that repository variable and verifies Google OAuth with `https://xujiehui.github.io/MarkNote/?app=1` as the web redirect. A Pages build fails instead of publishing a local-only bundle when the variable is missing or the endpoint is absent from the generated assets. After deployment, `check:pages-deployment` downloads the live site and verifies the endpoint, CORS response, runtime payload, absence of embedded keys, and enabled Google Auth provider. In Supabase Auth URL Configuration, set **Site URL** to that Pages URL and add the same exact URL to **Redirect URLs**. Otherwise Supabase silently ignores `redirectTo` and falls back to the default `http://localhost:3000` Site URL.
 
 Then apply the SQL in `supabase/migrations/202606190001_marknote_sync_schema.sql` to your Supabase project. You can print the migration for the Supabase SQL Editor with `npm run print:supabase-migration`.
 Also apply `supabase/migrations/202607180003_marknote_sync_config_bucket.sql` before uploading `sync-config.json`.
@@ -244,7 +244,7 @@ cp .env.example .env.local
 `https://wgagahicbbmqbqttedjy.supabase.co/storage/v1/object/public/marknote-config/sync-config.json`。
 先应用 `marknote-config` bucket 迁移，再将上面的 JSON 作为 `sync-config.json` 上传，并把同一个 URL 设置为 GitHub Actions 仓库变量 `MARKNOTE_SYNC_CONFIG_URL`。对象只能包含 Supabase URL 和 publishable key，不能上传 secret 或 service-role key。bucket 只公开读取，上传仍是受保护的部署操作。
 
-GitHub Pages 工作流会强制读取这个仓库变量，并使用 `https://xujiehui.github.io/MarkNote/?app=1` 验证 Google OAuth 回跳。变量缺失或生成产物未包含配置 endpoint 时，Pages 构建会直接失败，不再发布仅本地模式的页面。部署后，`check:pages-deployment` 会下载真实线上站点，并验证 endpoint、CORS、运行时配置、产物未嵌入 key，以及 Google Auth provider 已启用。Supabase Auth redirect URLs 中必须加入这个精确地址。
+GitHub Pages 工作流会强制读取这个仓库变量，并使用 `https://xujiehui.github.io/MarkNote/?app=1` 验证 Google OAuth 回跳。变量缺失或生成产物未包含配置 endpoint 时，Pages 构建会直接失败，不再发布仅本地模式的页面。部署后，`check:pages-deployment` 会下载真实线上站点，并验证 endpoint、CORS、运行时配置、产物未嵌入 key，以及 Google Auth provider 已启用。在 Supabase Auth URL Configuration 中，必须把 **Site URL** 设置为这个 Pages 地址，并把相同的精确地址加入 **Redirect URLs**；否则 Supabase 会静默忽略 `redirectTo`，回退到默认的 `http://localhost:3000` Site URL。
 
 GitHub Actions 不读取构建机上的 `.env.local`。要让 macOS/Windows 分发产物启用云同步，请在仓库的 Actions Variables 中设置 `MARKNOTE_SYNC_CONFIG_URL`；工作流会把它作为 `VITE_SYNC_CONFIG_URL` 传给 Vite。未设置时构建仍会成功，但产物明确运行在本地模式。
 

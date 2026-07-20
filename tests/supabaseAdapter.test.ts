@@ -231,6 +231,19 @@ async function main() {
   assert.equal(webStub.calls[0].options?.redirectTo, 'http://127.0.0.1:5173/?app=1');
   assert.equal(webStub.calls[0].options?.skipBrowserRedirect, false);
 
+  dom.reconfigure({
+    url: 'https://xujiehui.github.io/MarkNote/?app=1&v=deployment-cache-bust#app',
+  });
+  const pagesStub = createClientStub();
+  const pagesAdapter = new SupabaseSyncAdapter(
+    'https://example.supabase.co',
+    'sb_publishable_test',
+    pagesStub.client as never,
+  );
+  await pagesAdapter.signInWithOAuth('google');
+  assert.equal(pagesStub.calls[0].options?.redirectTo, 'https://xujiehui.github.io/MarkNote/?app=1');
+  dom.reconfigure({ url: 'http://127.0.0.1:5173/?app=1' });
+
   const configuredRedirectStub = createClientStub();
   const configuredRedirectAdapter = new SupabaseSyncAdapter(
     'https://example.supabase.co',
