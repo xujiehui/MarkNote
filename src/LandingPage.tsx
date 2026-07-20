@@ -4,10 +4,9 @@ import {
   Braces,
   Check,
   Cloud,
-  Download,
+  CloudCog,
   FileDown,
   FolderOpen,
-  HardDrive,
   History,
   Image,
   Laptop,
@@ -18,6 +17,7 @@ import {
   SearchCheck,
   Sparkles,
   Tags,
+  type LucideIcon,
 } from 'lucide-react';
 import { LanguageSwitch } from './components/LanguageSwitch';
 import { useI18n } from './i18n';
@@ -27,191 +27,164 @@ const repoHref = 'https://github.com/xujiehui/MarkNote';
 const actionsHref = 'https://github.com/xujiehui/MarkNote/actions/workflows/desktop-build.yml';
 
 const featureKeys = [
-  { icon: HardDrive, titleKey: 'landing.featureLocalTitle', descriptionKey: 'landing.featureLocalDesc' },
-  { icon: Cloud, titleKey: 'landing.featureSyncTitle', descriptionKey: 'landing.featureSyncDesc' },
-  { icon: FolderOpen, titleKey: 'landing.featureOrganizeTitle', descriptionKey: 'landing.featureOrganizeDesc' },
+  { icon: Search, titleKey: 'landing.featureSearchTitle', descriptionKey: 'landing.featureSearchDesc' },
   { icon: Image, titleKey: 'landing.featureEditorTitle', descriptionKey: 'landing.featureEditorDesc' },
   { icon: History, titleKey: 'landing.featureHistoryTitle', descriptionKey: 'landing.featureHistoryDesc' },
   { icon: FileDown, titleKey: 'landing.featureExportTitle', descriptionKey: 'landing.featureExportDesc' },
 ];
 
-const workflowKeys = ['landing.workflowOrganize', 'landing.workflowWrite', 'landing.workflowSync'];
-const heroStatKeys = [
-  ['landing.heroStatLocalValue', 'landing.heroStatLocalLabel'],
-  ['landing.heroStatSyncValue', 'landing.heroStatSyncLabel'],
-  ['landing.heroStatDesktopValue', 'landing.heroStatDesktopLabel'],
-];
 const syncProofKeys = [
-  { icon: Lock, titleKey: 'landing.syncProofLocalTitle', descriptionKey: 'landing.syncProofLocalDesc' },
-  { icon: Cloud, titleKey: 'landing.syncProofAccountTitle', descriptionKey: 'landing.syncProofAccountDesc' },
-  { icon: SearchCheck, titleKey: 'landing.syncProofDiagnoseTitle', descriptionKey: 'landing.syncProofDiagnoseDesc' },
+  { icon: Lock, titleKey: 'landing.syncLocalTitle', descriptionKey: 'landing.syncLocalDesc' },
+  { icon: CloudCog, titleKey: 'landing.syncRuntimeTitle', descriptionKey: 'landing.syncRuntimeDesc' },
+  { icon: SearchCheck, titleKey: 'landing.syncDiagnoseTitle', descriptionKey: 'landing.syncDiagnoseDesc' },
 ];
-const privacyKeys = [
-  'landing.privacyLocalDefault',
-  'landing.privacyOAuthOptional',
-  'landing.privacyBackups',
-  'landing.privacyDiagnostics',
+
+const platformKeys = [
+  { icon: MonitorDown, label: 'macOS Intel', detailKey: 'landing.macIntelDetail' },
+  { icon: MonitorDown, label: 'macOS Apple Silicon', detailKey: 'landing.macArmDetail' },
+  { icon: MonitorDown, label: 'Windows x64', detailKey: 'landing.winDetail' },
+  { icon: Laptop, label: 'Web + PWA', detailKey: 'landing.webDetail' },
 ];
+
+const privacyKeys = ['landing.privacyLocal', 'landing.privacySync', 'landing.privacyPortable'];
 
 export function LandingPage() {
   const { t } = useI18n();
 
   return (
-    <main className="w-full overflow-x-hidden bg-[#f9faf8] text-ink">
-      <section className="relative min-h-[92dvh] overflow-hidden border-b border-stone-300/70 bg-[#eef1ed]">
-        <div className="absolute inset-x-0 top-0 h-px bg-white/80" />
-        <ProductPreview hero />
-        <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(238,241,237,0.98)_0%,rgba(238,241,237,0.9)_38%,rgba(238,241,237,0.2)_76%)]" />
-        <nav className="relative z-10 mx-auto flex max-w-7xl flex-col items-stretch gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between md:px-8">
-          <a href={import.meta.env.BASE_URL} className="flex min-w-0 items-center gap-3" aria-label="MarkNote home">
-            <img src={`${import.meta.env.BASE_URL}marknote.svg`} alt="" className="h-9 w-9" />
-            <span className="truncate text-lg font-semibold tracking-[0px] text-ink">MarkNote</span>
-          </a>
-          <div className="hidden items-center gap-7 text-sm font-medium text-stone-600 md:flex">
-            <a className="transition hover:text-ink" href="#features">
-              {t('landing.navFeatures')}
-            </a>
-            <a className="transition hover:text-ink" href="#sync">
-              {t('landing.navSync')}
-            </a>
-            <a className="transition hover:text-ink" href="#platforms">
-              {t('landing.navPlatforms')}
-            </a>
-            <a className="transition hover:text-ink" href="#privacy">
-              {t('landing.navPrivacy')}
-            </a>
-          </div>
-          <div className="flex w-full items-center justify-between gap-2 sm:ml-auto sm:w-auto sm:justify-end">
-            <LanguageSwitch compact shortLabels />
-            <a
-              href={actionsHref}
-              className="inline-flex h-10 min-w-0 items-center gap-2 rounded-md border border-stone-300 bg-white px-2 text-sm font-semibold text-ink shadow-subtle transition hover:border-stone-400 hover:bg-stone-50 sm:px-3"
-            >
-              <Download size={16} className="shrink-0" />
-              <span className="hidden sm:inline">{t('landing.builds')}</span>
-            </a>
-          </div>
-        </nav>
+    <main className="min-h-[100dvh] overflow-x-hidden bg-[#f5f6f8] text-[#151a23]">
+      <SiteHeader />
 
-        <div className="relative z-10 mx-auto box-border flex w-full max-w-7xl min-w-0 flex-col justify-center px-5 pb-16 pt-8 md:min-h-[calc(92dvh-73px)] md:px-8 md:pb-20 md:pt-8">
-          <div className="mb-5 flex w-full max-w-full items-start gap-2 rounded-md border border-stone-300 bg-white px-3 py-1.5 text-sm font-medium leading-5 text-stone-600 sm:inline-flex sm:w-fit sm:items-center">
-            <Sparkles size={15} className="shrink-0" />
-            <span className="min-w-0 flex-1 break-words">{t('landing.badge')}</span>
+      <section className="border-b border-[#e5e7eb] bg-[#f5f6f8]">
+        <div className="mx-auto grid max-w-7xl items-center gap-12 px-5 pb-16 pt-12 md:grid-cols-[0.82fr_1.18fr] md:px-8 md:pb-16 md:pt-16">
+          <div className="min-w-0">
+            <div className="inline-flex max-w-full items-center gap-2 rounded-lg border border-[#bfdbfe] bg-[#eaf2ff] px-3 py-1.5 text-sm font-semibold leading-5 text-[#2563eb]">
+              <Sparkles size={15} className="shrink-0" />
+              <span className="min-w-0 break-words">{t('landing.heroEyebrow')}</span>
+            </div>
+            <h1 className="mt-6 max-w-[12ch] text-5xl font-semibold leading-[1.04] tracking-[0px] text-[#151a23] md:max-w-[15ch] md:text-6xl">
+              {t('landing.heroTitle')}
+            </h1>
+            <p className="mt-6 max-w-[50ch] text-lg leading-8 text-[#4b5563]">{t('landing.heroCopy')}</p>
+            <div className="md:hidden">
+              <MobileWorkspacePreview />
+            </div>
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+              <a
+                href={appHref}
+                className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[#2f7df6] px-5 text-sm font-semibold text-white transition hover:bg-[#256ce0] active:scale-[0.98]"
+              >
+                {t('app.open')}
+                <ArrowRight size={17} />
+              </a>
+              <a
+                href="#features"
+                className="inline-flex h-12 items-center justify-center gap-2 rounded-lg border border-[#d1d5db] bg-white px-5 text-sm font-semibold text-[#151a23] transition hover:border-[#9ca3af] hover:bg-[#f9fafb] active:scale-[0.98]"
+              >
+                {t('landing.heroSecondaryCta')}
+                <ArrowRight size={17} />
+              </a>
+            </div>
+            <div className="mt-10 flex max-w-2xl items-center gap-2 border-t border-[#dfe3e8] pt-5 text-sm leading-6 text-[#4b5563]">
+              <Check size={17} className="shrink-0 text-[#16a34a]" />
+              <span>{t('landing.heroProof')}</span>
+            </div>
           </div>
-          <h1 className="max-w-[11ch] text-5xl font-semibold leading-[0.98] tracking-[0px] text-ink md:text-7xl">
-            MarkNote
-          </h1>
-          <p className="mt-6 max-w-full break-words text-lg leading-8 text-stone-700 md:max-w-[58ch]">
-            {t('landing.heroCopy')}
-          </p>
-          <div className="mt-8 flex w-full max-w-full flex-col gap-3 sm:w-auto sm:flex-row">
-            <a
-              href={appHref}
-              className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-md bg-ink px-5 text-sm font-semibold text-white transition hover:bg-graphite sm:w-auto"
-            >
-              {t('app.open')}
-              <ArrowRight size={17} />
-            </a>
-            <a
-              href={repoHref}
-              className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-md border border-stone-300 bg-white px-5 text-sm font-semibold text-ink transition hover:border-stone-400 hover:bg-stone-50 sm:w-auto"
-            >
-              {t('app.viewSource')}
-            </a>
-          </div>
-          <div className="mt-8 grid w-full max-w-full grid-cols-1 gap-2 text-sm text-stone-600 sm:max-w-2xl sm:grid-cols-3">
-            {heroStatKeys.map(([valueKey, labelKey]) => (
-              <div key={valueKey} className="rounded-md border border-stone-300 bg-white/85 px-3 py-2">
-                <span className="block text-sm font-semibold text-ink">{t(valueKey)}</span>
-                <span className="mt-1 block text-xs leading-5 text-stone-600">{t(labelKey)}</span>
-              </div>
-            ))}
-          </div>
-          <div className="mt-4 grid w-full max-w-full grid-cols-1 gap-2 text-sm text-stone-600 sm:max-w-2xl sm:grid-cols-3">
-            {workflowKeys.map((key, index) => (
-              <div key={key} className="rounded-md border border-stone-300 bg-white/80 px-3 py-2">
-                <span className="mb-2 block text-xs font-semibold text-moss">0{index + 1}</span>
-                {t(key)}
-              </div>
-            ))}
+
+          <div className="min-w-0">
+            <WorkspacePreview />
           </div>
         </div>
       </section>
 
-      <section id="features" className="mx-auto max-w-7xl bg-[#f9faf8] px-5 py-16 md:px-8 md:py-20">
-        <div className="grid gap-8 md:grid-cols-[0.78fr_1.22fr]">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0px] text-moss">{t('landing.featuresEyebrow')}</p>
-            <h2 className="mt-3 max-w-[14ch] text-4xl font-semibold leading-tight tracking-[0px] text-ink md:text-5xl">
+      <section id="features" className="border-b border-[#e5e7eb] bg-white">
+        <div className="mx-auto max-w-7xl px-5 py-16 md:px-8 md:py-24">
+          <div className="max-w-3xl">
+            <p className="text-sm font-semibold uppercase tracking-[0px] text-[#2563eb]">{t('landing.featuresEyebrow')}</p>
+            <h2 className="mt-3 text-4xl font-semibold leading-tight tracking-[0px] text-[#151a23] md:text-5xl">
               {t('landing.featuresTitle')}
             </h2>
-            <p className="mt-5 max-w-[58ch] text-base leading-7 text-stone-600">
-              {t('landing.featuresCopy')}
-            </p>
+            <p className="mt-5 text-base leading-7 text-[#6b7280]">{t('landing.featuresCopy')}</p>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {featureKeys.map((feature) => (
-              <article key={feature.titleKey} className="rounded-md border border-stone-300 bg-white p-5 shadow-subtle">
-                <feature.icon className="mb-5 text-moss" size={22} />
-                <h3 className="text-lg font-semibold leading-6 text-ink">{t(feature.titleKey)}</h3>
-                <p className="mt-3 text-sm leading-6 text-stone-600">{t(feature.descriptionKey)}</p>
-              </article>
-            ))}
+
+          <div className="mt-12 grid gap-4 lg:grid-cols-[1.08fr_0.92fr]">
+            <article className="min-h-[430px] overflow-hidden rounded-xl border border-[#1f2937] bg-[#111827] p-6 text-white shadow-[0_18px_40px_rgba(15,23,42,0.14)] md:p-8">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0px] text-[#93c5fd]">{t('landing.editorEyebrow')}</p>
+                  <h3 className="mt-2 text-2xl font-semibold text-white">{t('landing.editorTitle')}</h3>
+                </div>
+                <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-[#2563eb] text-white">
+                  <ListChecks size={19} />
+                </div>
+              </div>
+              <p className="mt-5 max-w-[52ch] text-sm leading-6 text-[#cbd5e1]">{t('landing.editorCopy')}</p>
+              <div className="mt-8 rounded-lg border border-white/10 bg-[#1f2937] p-4">
+                <div className="mb-4 flex items-center gap-2 border-b border-white/10 pb-3 text-xs text-[#9ca3af]">
+                  <span className="rounded-md bg-[#2563eb] px-2 py-1 font-semibold text-white">{t('landing.previewWork')}</span>
+                  <span>{t('landing.previewSaved')}</span>
+                </div>
+                <div className="space-y-3 text-sm">
+                  <div className="h-3 w-4/5 rounded bg-[#e5e7eb]" />
+                  <div className="h-3 w-full rounded bg-[#4b5563]" />
+                  <div className="h-3 w-3/5 rounded bg-[#4b5563]" />
+                  <div className="mt-5 grid grid-cols-[16px_1fr] gap-2 text-[#cbd5e1]">
+                    <Check size={15} className="mt-0.5 text-[#60a5fa]" />
+                    <span>{t('landing.editorChecklist')}</span>
+                  </div>
+                </div>
+              </div>
+              <pre className="mt-4 overflow-hidden rounded-lg bg-[#0f172a] p-4 text-xs leading-6 text-[#bfdbfe]"><code>note.save() / note.sync()</code></pre>
+            </article>
+
+            <div className="divide-y divide-[#e5e7eb] overflow-hidden rounded-xl border border-[#e5e7eb] bg-[#f9fafb]">
+              {featureKeys.map((feature) => (
+                <FeatureRow key={feature.titleKey} icon={feature.icon} title={t(feature.titleKey)} description={t(feature.descriptionKey)} />
+              ))}
+            </div>
           </div>
         </div>
       </section>
 
-      <section id="sync" className="border-y border-stone-300 bg-[#f1f4ee]">
-        <div className="mx-auto grid max-w-7xl gap-8 px-5 py-16 md:grid-cols-[0.95fr_1.05fr] md:px-8 md:py-20">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0px] text-moss">{t('landing.syncEyebrow')}</p>
-            <h2 className="mt-3 max-w-[13ch] text-4xl font-semibold leading-tight tracking-[0px] text-ink md:text-5xl">
+      <section id="sync" className="border-b border-[#bfdbfe] bg-[#eef5ff]">
+        <div className="mx-auto grid max-w-7xl gap-12 px-5 py-16 md:grid-cols-[0.88fr_1.12fr] md:px-8 md:py-24">
+          <div className="self-center">
+            <div className="inline-flex items-center gap-2 rounded-lg border border-[#bfdbfe] bg-white px-3 py-1.5 text-sm font-semibold text-[#2563eb]">
+              <Cloud size={15} />
+              {t('landing.syncEyebrow')}
+            </div>
+            <h2 className="mt-5 max-w-[14ch] text-4xl font-semibold leading-tight tracking-[0px] text-[#151a23] md:text-5xl">
               {t('landing.syncTitle')}
             </h2>
-            <p className="mt-5 max-w-[62ch] text-base leading-7 text-stone-700">
-              {t('landing.syncCopy')}
-            </p>
+            <p className="mt-5 max-w-[58ch] text-base leading-7 text-[#4b5563]">{t('landing.syncCopy')}</p>
+            <a href={appHref} className="mt-8 inline-flex h-11 items-center gap-2 rounded-lg bg-[#2f7df6] px-4 text-sm font-semibold text-white transition hover:bg-[#256ce0] active:scale-[0.98]">
+              {t('landing.syncCta')}
+              <ArrowRight size={16} />
+            </a>
           </div>
-          <div className="grid content-center gap-3">
-            {syncProofKeys.map((item) => (
-              <div key={item.titleKey} className="grid grid-cols-[44px_minmax(0,1fr)] gap-4 rounded-md border border-stone-300 bg-white p-4 shadow-subtle">
-                <div className="grid h-11 w-11 place-items-center rounded-md bg-linen text-moss">
-                  <item.icon size={20} />
-                </div>
-                <div className="min-w-0">
-                  <h3 className="font-semibold text-ink">{t(item.titleKey)}</h3>
-                  <p className="mt-1 text-sm leading-6 text-stone-600">{t(item.descriptionKey)}</p>
-                </div>
-              </div>
-            ))}
-          </div>
+
+          <SyncPanelPreview />
         </div>
       </section>
 
-      <section id="platforms" className="border-b border-stone-300 bg-[#253039] text-white">
-        <div className="mx-auto grid max-w-7xl gap-8 px-5 py-16 md:grid-cols-[1fr_1fr] md:px-8">
+      <section id="platforms" className="border-b border-[#1f2937] bg-[#111827] text-white">
+        <div className="mx-auto grid max-w-7xl gap-12 px-5 py-16 md:grid-cols-[0.8fr_1.2fr] md:px-8 md:py-24">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0px] text-[#9bb889]">{t('landing.platformsEyebrow')}</p>
-            <h2 className="mt-3 text-4xl font-semibold leading-tight tracking-[0px] text-white md:text-5xl">
-              {t('landing.platformsTitle')}
-            </h2>
-            <p className="mt-5 max-w-[62ch] text-base leading-7 text-stone-200">
-              {t('landing.platformsCopy')}
-            </p>
+            <p className="text-sm font-semibold uppercase tracking-[0px] text-[#93c5fd]">{t('landing.platformsEyebrow')}</p>
+            <h2 className="mt-3 max-w-[12ch] text-4xl font-semibold leading-tight tracking-[0px] md:text-5xl">{t('landing.platformsTitle')}</h2>
+            <p className="mt-5 max-w-[54ch] text-base leading-7 text-[#cbd5e1]">{t('landing.platformsCopy')}</p>
+            <a href={actionsHref} className="mt-8 inline-flex h-11 items-center gap-2 rounded-lg border border-white/20 px-4 text-sm font-semibold text-white transition hover:border-white/40 hover:bg-white/10">
+              {t('landing.platformsCta')}
+              <ArrowRight size={16} />
+            </a>
           </div>
-          <div className="grid content-center gap-3">
-            {[
-              ['macOS Intel', t('landing.macIntelDetail')],
-              ['macOS Apple Silicon', t('landing.macArmDetail')],
-              ['Windows x64', t('landing.winDetail')],
-            ].map(([title, detail]) => (
-              <div key={title} className="flex items-start gap-4 rounded-md border border-white/10 bg-white/10 p-4 shadow-subtle">
-                <div className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-white text-moss">
-                  <MonitorDown size={19} />
-                </div>
-                <div>
-                  <h3 className="font-semibold text-white">{title}</h3>
-                  <p className="mt-1 text-sm leading-6 text-stone-200">{detail}</p>
+          <div className="divide-y divide-white/10 border-y border-white/10">
+            {platformKeys.map((item) => (
+              <div key={item.label} className="grid grid-cols-[40px_minmax(0,1fr)] items-center gap-4 py-4">
+                <div className="grid h-9 w-9 place-items-center rounded-lg bg-white text-[#2563eb]"><item.icon size={18} /></div>
+                <div className="min-w-0">
+                  <h3 className="font-semibold text-white">{item.label}</h3>
+                  <p className="mt-1 text-sm leading-6 text-[#94a3b8]">{t(item.detailKey)}</p>
                 </div>
               </div>
             ))}
@@ -219,40 +192,37 @@ export function LandingPage() {
         </div>
       </section>
 
-      <section id="privacy" className="mx-auto grid max-w-7xl gap-8 px-5 py-16 md:grid-cols-[0.9fr_1.1fr] md:px-8 md:py-20">
-        <div className="rounded-md border border-stone-300 bg-ink p-6 text-white shadow-subtle">
-          <Lock size={24} />
-          <h2 className="mt-8 text-3xl font-semibold leading-tight tracking-[0px]">{t('landing.privacyTitle')}</h2>
-          <p className="mt-4 text-base leading-7 text-stone-200">
-            {t('landing.privacyCopy')}
-          </p>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {privacyKeys.map((key) => (
-            <div key={key} className="flex items-start gap-3 rounded-md border border-stone-300 bg-white p-4">
-              <Check className="mt-0.5 shrink-0 text-moss" size={18} />
-              <span className="text-sm font-medium leading-6 text-stone-700">{t(key)}</span>
-            </div>
-          ))}
+      <section id="privacy" className="border-b border-[#e5e7eb] bg-white">
+        <div className="mx-auto grid max-w-7xl gap-12 px-5 py-16 md:grid-cols-[0.8fr_1.2fr] md:px-8 md:py-24">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0px] text-[#2563eb]">{t('landing.privacyEyebrow')}</p>
+            <h2 className="mt-3 max-w-[12ch] text-4xl font-semibold leading-tight tracking-[0px] text-[#151a23] md:text-5xl">{t('landing.privacyTitle')}</h2>
+            <p className="mt-5 max-w-[54ch] text-base leading-7 text-[#6b7280]">{t('landing.privacyCopy')}</p>
+          </div>
+          <div className="divide-y divide-[#e5e7eb] border-y border-[#e5e7eb]">
+            {privacyKeys.map((key) => (
+              <div key={key} className="flex items-start gap-3 py-5 text-base leading-7 text-[#374151]">
+                <Check size={18} className="mt-1 shrink-0 text-[#2f7df6]" />
+                <span>{t(key)}</span>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 
-      <footer className="border-t border-stone-300 bg-white">
-        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 py-8 text-sm text-stone-600 md:flex-row md:items-center md:justify-between md:px-8">
+      <footer className="bg-[#f5f6f8]">
+        <div className="mx-auto flex max-w-7xl flex-col gap-5 px-5 py-8 text-sm text-[#6b7280] md:flex-row md:items-center md:justify-between md:px-8">
           <div className="flex items-center gap-3">
             <img src={`${import.meta.env.BASE_URL}marknote.svg`} alt="" className="h-8 w-8" />
-            <span>MarkNote</span>
+            <div>
+              <div className="font-semibold text-[#151a23]">MarkNote</div>
+              <div className="mt-0.5 text-xs">{t('landing.footerTagline')}</div>
+            </div>
           </div>
-          <div className="flex flex-wrap gap-5">
-            <a className="transition hover:text-ink" href={appHref}>
-              {t('landing.footerWebApp')}
-            </a>
-            <a className="transition hover:text-ink" href={actionsHref}>
-              {t('landing.footerArtifacts')}
-            </a>
-            <a className="transition hover:text-ink" href={repoHref}>
-              GitHub
-            </a>
+          <div className="flex flex-wrap gap-x-5 gap-y-2">
+            <a className="hover:text-[#151a23]" href={appHref}>{t('landing.footerWebApp')}</a>
+            <a className="hover:text-[#151a23]" href={actionsHref}>{t('landing.footerArtifacts')}</a>
+            <a className="hover:text-[#151a23]" href={repoHref}>{t('landing.footerSource')}</a>
           </div>
         </div>
       </footer>
@@ -260,145 +230,144 @@ export function LandingPage() {
   );
 }
 
-function ProductPreview({ hero = false }: { hero?: boolean }) {
+function SiteHeader() {
   const { t } = useI18n();
 
   return (
-    <div
-      className={
-        hero
-          ? 'pointer-events-none absolute -right-36 top-24 hidden w-[820px] rotate-[-1deg] lg:block xl:right-4 xl:w-[900px]'
-          : 'relative min-h-[460px] overflow-x-auto pb-4'
-      }
-    >
-      <div className="absolute inset-0 translate-x-8 translate-y-8 rounded-md border border-stone-300 bg-clay/10" />
-      <div
-        className={`relative min-w-[640px] overflow-hidden rounded-md border border-stone-300 bg-white shadow-[0_24px_80px_rgba(36,34,31,0.18)] ${
-          hero ? 'min-w-0' : ''
-        }`}
-      >
-        <div className="flex h-10 items-center justify-between border-b border-stone-200 bg-[#f7f3ec] px-4">
-          <div className="flex gap-2">
-            <span className="h-3 w-3 rounded-full bg-[#d96b5d]" />
-            <span className="h-3 w-3 rounded-full bg-[#dfb85f]" />
-            <span className="h-3 w-3 rounded-full bg-[#6aa76f]" />
-          </div>
-          <span className="text-xs font-medium text-stone-500">{t('landing.previewWorkspace')}</span>
+    <header className="border-b border-[#e5e7eb] bg-[#f5f6f8]">
+      <nav className="mx-auto flex min-h-16 max-w-7xl flex-wrap items-center justify-between gap-4 px-5 py-3 md:px-8">
+        <a href={import.meta.env.BASE_URL} className="flex min-w-0 items-center gap-3" aria-label="MarkNote home">
+          <img src={`${import.meta.env.BASE_URL}marknote.svg`} alt="" className="h-9 w-9" />
+          <span className="truncate text-lg font-semibold text-[#151a23]">MarkNote</span>
+        </a>
+        <div className="hidden items-center gap-6 text-sm font-medium text-[#6b7280] lg:flex">
+          <a className="hover:text-[#151a23]" href="#features">{t('landing.navFeatures')}</a>
+          <a className="hover:text-[#151a23]" href="#sync">{t('landing.navSync')}</a>
+          <a className="hover:text-[#151a23]" href="#platforms">{t('landing.navPlatforms')}</a>
         </div>
-        <div className="grid min-h-[452px] grid-cols-[130px_168px_minmax(300px,1fr)] bg-paper sm:grid-cols-[156px_198px_minmax(350px,1fr)] lg:grid-cols-[170px_220px_1fr]">
-          <aside className="grid border-r border-stone-200 bg-linen p-4">
-            <div>
-              <div className="mb-5 flex items-center gap-2">
-                <img src={`${import.meta.env.BASE_URL}marknote.svg`} alt="" className="h-8 w-8" />
-                <div className="min-w-0 font-semibold text-ink">MarkNote</div>
-              </div>
-              <PreviewSearch />
-              <PreviewNav icon={<Laptop size={15} />} label={t('landing.previewAllNotes')} active />
-              <PreviewNav icon={<FolderOpen size={15} />} label={t('landing.previewLibrary')} />
-              <PreviewNav icon={<Braces size={15} />} label={t('tag.codeSnippets')} />
-              <PreviewNav icon={<Tags size={15} />} label={t('landing.previewProjects')} />
-            </div>
-            <div className="self-end rounded-md border border-stone-300 bg-white p-3 text-xs text-stone-600">
-              <div className="mb-2 flex items-center gap-2 font-semibold text-moss">
-                <Cloud size={14} />
-                {t('landing.previewSyncStatus')}
-              </div>
-              <p className="leading-5">{t('landing.previewSyncDetail')}</p>
-            </div>
-          </aside>
-          <section className="border-r border-stone-200 bg-white p-3">
-            <PreviewNote title={t('landing.previewLaunchTitle')} tag={t('landing.previewWork')} active />
-            <PreviewNote title={t('landing.previewCodeTitle')} tag={t('tag.codeSnippets')} />
-            <PreviewNote title={t('landing.previewReadingTitle')} tag={t('landing.previewPersonal')} />
-            <div className="mt-4 rounded-md border border-stone-200 bg-[#fbfaf7] p-3">
-              <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-ink">
-                <History size={14} />
-                {t('landing.previewHistory')}
-              </div>
-              <div className="space-y-2 text-xs text-stone-500">
-                <div className="h-2 rounded-full bg-stone-200" />
-                <div className="h-2 w-4/5 rounded-full bg-stone-200" />
-                <div>{t('landing.previewHistoryDetail')}</div>
-              </div>
-            </div>
-          </section>
-          <article className="bg-[#fbfaf7] p-5 sm:p-7">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <span className="rounded-md bg-moss px-2 py-1 text-xs font-semibold text-white">{t('landing.previewWork')}</span>
-              <span className="text-xs text-stone-500">{t('landing.previewSaved')}</span>
-            </div>
-            <h3 className="text-3xl font-semibold tracking-[0px] text-ink">{t('landing.previewLaunchTitle')}</h3>
-            <p className="mt-4 max-w-[54ch] text-sm leading-6 text-stone-600">
-              {t('landing.previewCopy')}
-            </p>
-            <div className="mt-5 grid gap-3 sm:grid-cols-[1fr_0.8fr]">
-              <div className="rounded-md border border-stone-200 bg-white p-4">
-                <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-ink">
-                  <ListChecks size={16} />
-                  {t('landing.previewChecklistTitle')}
-                </div>
-                <PreviewChecklistItem label={t('landing.previewChecklistOrganize')} />
-                <PreviewChecklistItem label={t('landing.previewChecklistSync')} />
-                <PreviewChecklistItem label={t('landing.previewChecklistBuild')} />
-              </div>
-              <div className="rounded-md border border-stone-200 bg-white p-4">
-                <div className="mb-3 h-20 rounded-md bg-[linear-gradient(135deg,#4f6f52,#b45f45)]" />
-                <div className="space-y-2">
-                  <div className="h-2.5 w-full rounded-full bg-stone-200" />
-                  <div className="h-2.5 w-4/5 rounded-full bg-stone-200" />
-                  <div className="h-2.5 w-2/3 rounded-full bg-stone-200" />
-                </div>
-              </div>
-            </div>
-            <pre className="mt-4 overflow-hidden rounded-md bg-[#1f2329] p-4 text-xs leading-6 text-stone-100">
-              <code>{`npm run check:google-oauth\nnpm run check:supabase-sync:oauth\nnpm run dist:mac:arm64`}</code>
-            </pre>
-          </article>
+        <div className="flex items-center gap-2">
+          <LanguageSwitch compact shortLabels />
+          <a href={appHref} className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#2f7df6] px-3 text-sm font-semibold text-white transition hover:bg-[#256ce0] active:scale-[0.98]">
+            {t('landing.headerCta')}
+            <ArrowRight size={15} />
+          </a>
+        </div>
+      </nav>
+    </header>
+  );
+}
+
+function WorkspacePreview() {
+  const { t } = useI18n();
+
+  return (
+    <div className="relative hidden md:block">
+      <div className="absolute -inset-3 rounded-2xl border border-[#bfdbfe] bg-[#eef5ff]" />
+      <div className="relative overflow-hidden rounded-xl border border-[#d1d5db] bg-white shadow-[0_24px_60px_rgba(15,23,42,0.14)]">
+        <div className="flex h-11 items-center justify-between border-b border-[#e5e7eb] bg-white px-4 text-xs text-[#6b7280]">
+          <div className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]" /><span className="h-2.5 w-2.5 rounded-full bg-[#ffbd2e]" /><span className="h-2.5 w-2.5 rounded-full bg-[#28c840]" /></div>
+          <span className="font-medium">{t('landing.previewWorkspace')}</span>
+          <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[#22c55e]" />{t('landing.previewSaved')}</span>
+        </div>
+        <div className="grid min-h-[420px] grid-cols-[154px_188px_minmax(0,1fr)] bg-[#f5f6f8]">
+          <PreviewSidebar />
+          <PreviewNoteList />
+          <PreviewEditor />
         </div>
       </div>
     </div>
   );
 }
 
-function PreviewSearch() {
+function PreviewSidebar() {
   const { t } = useI18n();
 
   return (
-    <div className="mb-4 flex h-9 items-center gap-2 rounded-md border border-stone-300 bg-white px-3 text-xs text-stone-400">
-      <Search size={14} />
-      {t('landing.previewSearch')}
+    <aside className="grid border-r border-[#e5e7eb] bg-[#f5f6f8] p-4">
+      <div>
+        <div className="mb-5 flex items-center gap-2"><img src={`${import.meta.env.BASE_URL}marknote.svg`} alt="" className="h-8 w-8" /><span className="font-semibold text-[#151a23]">MarkNote</span></div>
+        <div className="mb-4 flex h-8 items-center gap-2 rounded-lg bg-[#eaedf2] px-2.5 text-[11px] text-[#6b7280]"><Search size={13} /><span className="truncate">{t('landing.previewSearch')}</span></div>
+        <PreviewNav icon={<Laptop size={14} />} label={t('landing.previewAllNotes')} active />
+        <PreviewNav icon={<FolderOpen size={14} />} label={t('landing.previewLibrary')} />
+        <PreviewNav icon={<Braces size={14} />} label={t('landing.previewCode')} />
+        <PreviewNav icon={<Tags size={14} />} label={t('landing.previewProjects')} />
+      </div>
+      <div className="self-end rounded-lg border border-[#e5e7eb] bg-white p-3 text-[11px] leading-5 text-[#6b7280]">
+        <div className="mb-1 flex items-center gap-2 font-semibold text-[#2563eb]"><Cloud size={13} />{t('landing.previewSync')}</div>
+        <div>{t('landing.previewSyncDetail')}</div>
+      </div>
+    </aside>
+  );
+}
+
+function PreviewNoteList() {
+  const { t } = useI18n();
+
+  return (
+    <section className="border-r border-[#e5e7eb] bg-white p-3">
+      <PreviewNote title={t('landing.previewNoteTitle')} tag={t('landing.previewWork')} active />
+      <PreviewNote title={t('landing.previewCodeTitle')} tag={t('landing.previewCode')} />
+      <PreviewNote title={t('landing.previewReadingTitle')} tag={t('landing.previewPersonal')} />
+      <div className="mt-4 rounded-lg border border-[#e5e7eb] bg-[#f9fafb] p-3">
+        <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold text-[#374151]"><History size={13} />{t('landing.previewHistory')}</div>
+        <div className="space-y-2"><div className="h-2 rounded bg-[#e5e7eb]" /><div className="h-2 w-4/5 rounded bg-[#e5e7eb]" /><div className="text-[10px] text-[#9ca3af]">{t('landing.previewHistoryDetail')}</div></div>
+      </div>
+    </section>
+  );
+}
+
+function PreviewEditor() {
+  const { t } = useI18n();
+
+  return (
+    <article className="min-w-0 bg-white p-6">
+      <div className="flex items-center justify-between gap-3"><span className="rounded-lg bg-[#eaf2ff] px-2.5 py-1 text-[11px] font-semibold text-[#2563eb]">{t('landing.previewWork')}</span><span className="text-[11px] text-[#6b7280]">{t('landing.previewSaved')}</span></div>
+      <h3 className="mt-5 text-2xl font-semibold text-[#151a23]">{t('landing.previewNoteTitle')}</h3>
+      <p className="mt-3 text-xs leading-5 text-[#6b7280]">{t('landing.previewEditorCopy')}</p>
+      <div className="mt-4 flex items-center gap-1 rounded-lg border border-[#e5e7eb] bg-[#f9fafb] p-1 text-[#6b7280]"><PreviewTool icon={<Braces size={13} />} /><PreviewTool icon={<Image size={13} />} /><PreviewTool icon={<ListChecks size={13} />} /><span className="ml-auto px-2 text-[10px] text-[#9ca3af]">{t('landing.previewToolbar')}</span></div>
+      <div className="mt-4 rounded-lg border border-[#e5e7eb] bg-white p-4"><div className="flex items-start gap-2 text-xs leading-5 text-[#4b5563]"><Check size={14} className="mt-0.5 shrink-0 text-[#2f7df6]" />{t('landing.previewChecklist')}</div><div className="mt-3 h-2 rounded bg-[#f3f4f6]" /><div className="mt-2 h-2 w-4/5 rounded bg-[#f3f4f6]" /></div>
+      <pre className="mt-4 overflow-hidden rounded-lg bg-[#111827] p-4 text-[10px] leading-5 text-[#bfdbfe]"><code>note.save() / note.sync()</code></pre>
+    </article>
+  );
+}
+
+function MobileWorkspacePreview() {
+  const { t } = useI18n();
+
+  return (
+    <div className="mt-10 overflow-hidden rounded-xl border border-[#d1d5db] bg-white shadow-[0_18px_40px_rgba(15,23,42,0.1)] md:hidden">
+      <div className="flex h-10 items-center justify-between border-b border-[#e5e7eb] px-4 text-[11px] text-[#6b7280]"><span className="font-semibold text-[#151a23]">MarkNote</span><span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[#22c55e]" />{t('landing.previewSaved')}</span></div>
+      <div className="p-4"><div className="flex h-9 items-center gap-2 rounded-lg bg-[#eaedf2] px-3 text-xs text-[#6b7280]"><Search size={14} />{t('landing.previewSearch')}</div><div className="mt-4 rounded-lg border-l-2 border-[#2f7df6] bg-[#eaf2ff] p-3"><div className="text-sm font-semibold text-[#151a23]">{t('landing.previewNoteTitle')}</div><div className="mt-1 text-xs text-[#6b7280]">{t('landing.previewWork')} · {t('landing.previewSaved')}</div></div><div className="mt-4 rounded-lg border border-[#e5e7eb] p-4"><div className="text-lg font-semibold text-[#151a23]">{t('landing.previewNoteTitle')}</div><p className="mt-2 text-sm leading-6 text-[#6b7280]">{t('landing.previewEditorCopy')}</p></div></div>
     </div>
   );
 }
 
-function PreviewNav({ icon, label, active = false }: { icon: ReactNode; label: string; active?: boolean }) {
+function SyncPanelPreview() {
+  const { t } = useI18n();
+
   return (
-    <div className={`mb-2 flex h-9 items-center gap-2 rounded-md px-3 text-sm ${active ? 'bg-white shadow-subtle' : 'text-stone-600'}`}>
-      {icon}
-      <span className="min-w-0 truncate">{label}</span>
+    <div className="overflow-hidden rounded-xl border border-[#bfdbfe] bg-white shadow-[0_18px_40px_rgba(37,99,235,0.1)]">
+      <div className="flex items-center justify-between gap-4 border-b border-[#e5e7eb] px-5 py-4"><div className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-full bg-[#eaf2ff] text-[#2563eb]"><Cloud size={18} /></div><div><div className="text-sm font-semibold text-[#151a23]">{t('landing.syncPanelTitle')}</div><div className="mt-1 text-xs text-[#6b7280]">{t('landing.syncPanelSubtitle')}</div></div></div><span className="flex items-center gap-1.5 text-xs font-semibold text-[#16a34a]"><span className="h-2 w-2 rounded-full bg-[#22c55e]" />{t('landing.syncPanelStatus')}</span></div>
+      <div className="divide-y divide-[#e5e7eb]">{syncProofKeys.map((item) => <div key={item.titleKey} className="grid grid-cols-[36px_minmax(0,1fr)] gap-3 px-5 py-4"><div className="grid h-9 w-9 place-items-center rounded-lg bg-[#f5f6f8] text-[#2563eb]"><item.icon size={17} /></div><div className="min-w-0"><h3 className="text-sm font-semibold text-[#151a23]">{t(item.titleKey)}</h3><p className="mt-1 text-xs leading-5 text-[#6b7280]">{t(item.descriptionKey)}</p></div></div>)}</div>
+      <div className="flex items-center justify-between border-t border-[#e5e7eb] bg-[#f9fafb] px-5 py-3 text-xs text-[#6b7280]"><span>{t('landing.syncPanelQueue')}</span><span className="font-semibold text-[#16a34a]">{t('landing.syncPanelReady')}</span></div>
     </div>
   );
+}
+
+function FeatureRow({ icon: Icon, title, description }: { icon: LucideIcon; title: string; description: string }) {
+  return <article className="flex items-start gap-4 bg-[#f9fafb] px-5 py-5 md:px-6"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-white text-[#2563eb] shadow-[0_1px_2px_rgba(15,23,42,0.06)]"><Icon size={18} /></div><div className="min-w-0"><h3 className="text-base font-semibold text-[#151a23]">{title}</h3><p className="mt-1 text-sm leading-6 text-[#6b7280]">{description}</p></div></article>;
+}
+
+function PreviewNav({ icon, label, active = false }: { icon: ReactNode; label: string; active?: boolean }) {
+  return <div className={`mb-1 flex h-8 items-center gap-2 rounded-lg px-2.5 text-xs ${active ? 'bg-white font-semibold text-[#2563eb] shadow-[0_1px_2px_rgba(15,23,42,0.06)]' : 'text-[#6b7280]'}`}>{icon}<span className="min-w-0 truncate">{label}</span></div>;
 }
 
 function PreviewNote({ title, tag, active = false }: { title: string; tag: string; active?: boolean }) {
   const { t } = useI18n();
 
-  return (
-    <div className={`mb-3 rounded-md border p-3 ${active ? 'border-moss bg-linen' : 'border-stone-200 bg-white'}`}>
-      <div className="text-sm font-semibold text-ink">{title}</div>
-      <div className="mt-2 flex items-center justify-between gap-2 text-xs text-stone-500">
-        <span className="min-w-0 truncate">{tag}</span>
-        <span className="shrink-0">{t('landing.previewAgo')}</span>
-      </div>
-    </div>
-  );
+  return <div className={`mb-2 rounded-lg border p-3 ${active ? 'border-[#93c5fd] bg-[#eaf2ff]' : 'border-[#e5e7eb] bg-white'}`}><div className="truncate text-xs font-semibold text-[#151a23]">{title}</div><div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-[#6b7280]"><span className="truncate">{tag}</span><span className="shrink-0">{t('landing.previewAgo')}</span></div></div>;
 }
 
-function PreviewChecklistItem({ label }: { label: string }) {
-  return (
-    <div className="mt-2 flex items-start gap-2 text-xs leading-5 text-stone-600">
-      <Check size={14} className="mt-0.5 shrink-0 text-moss" />
-      <span>{label}</span>
-    </div>
-  );
+function PreviewTool({ icon }: { icon: ReactNode }) {
+  return <span className="grid h-6 w-6 place-items-center rounded-md bg-white text-[#6b7280]">{icon}</span>;
 }
