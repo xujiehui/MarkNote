@@ -165,7 +165,7 @@ It runs on pushes, pull requests, version tags (`v*`), and manual workflow dispa
 - macOS Apple Silicon artifacts from `macos-15`
 - Windows x64 artifacts from `windows-latest`
 
-Artifacts are available from the workflow run page for 30 days.
+On version tags, the release job publishes the `.dmg`, `.zip`, and `.exe` packages to [GitHub Releases](https://github.com/xujiehui/MarkNote/releases/latest). Workflow artifacts remain available from the run page for 30 days.
 
 ### PWA Install
 
@@ -336,7 +336,7 @@ npm run dist:win
 - 来自 `macos-15` 的 macOS Apple Silicon 产物
 - 来自 `windows-latest` 的 Windows x64 产物
 
-构建产物会在 workflow run 页面保留 30 天。
+版本标签构建会将 `.dmg`、`.zip` 和 `.exe` 客户端发布到 [GitHub Releases](https://github.com/xujiehui/MarkNote/releases/latest)，workflow run 页面中的临时产物仍保留 30 天。
 
 ### PWA 安装
 

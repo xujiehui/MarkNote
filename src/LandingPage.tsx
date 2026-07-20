@@ -5,6 +5,7 @@ import {
   Check,
   Cloud,
   CloudCog,
+  Download,
   FileDown,
   FolderOpen,
   History,
@@ -24,7 +25,7 @@ import { useI18n } from './i18n';
 
 const appHref = `${import.meta.env.BASE_URL}?app=1`;
 const repoHref = 'https://github.com/xujiehui/MarkNote';
-const actionsHref = 'https://github.com/xujiehui/MarkNote/actions/workflows/desktop-build.yml';
+const releaseHref = `${repoHref}/releases/latest`;
 
 const featureKeys = [
   { icon: Search, titleKey: 'landing.featureSearchTitle', descriptionKey: 'landing.featureSearchDesc' },
@@ -40,10 +41,10 @@ const syncProofKeys = [
 ];
 
 const platformKeys = [
-  { icon: MonitorDown, label: 'macOS Intel', detailKey: 'landing.macIntelDetail' },
-  { icon: MonitorDown, label: 'macOS Apple Silicon', detailKey: 'landing.macArmDetail' },
-  { icon: MonitorDown, label: 'Windows x64', detailKey: 'landing.winDetail' },
-  { icon: Laptop, label: 'Web + PWA', detailKey: 'landing.webDetail' },
+  { icon: MonitorDown, label: 'macOS Intel', detailKey: 'landing.macIntelDetail', href: releaseHref, actionKey: 'landing.platformDownload' },
+  { icon: MonitorDown, label: 'macOS Apple Silicon', detailKey: 'landing.macArmDetail', href: releaseHref, actionKey: 'landing.platformDownload' },
+  { icon: MonitorDown, label: 'Windows x64', detailKey: 'landing.winDetail', href: releaseHref, actionKey: 'landing.platformDownload' },
+  { icon: Laptop, label: 'Web + PWA', detailKey: 'landing.webDetail', href: appHref, actionKey: 'landing.platformOpen' },
 ];
 
 const privacyKeys = ['landing.privacyLocal', 'landing.privacySync', 'landing.privacyPortable'];
@@ -173,20 +174,24 @@ export function LandingPage() {
             <p className="text-sm font-semibold uppercase tracking-[0px] text-[#93c5fd]">{t('landing.platformsEyebrow')}</p>
             <h2 className="mt-3 max-w-[12ch] text-4xl font-semibold leading-tight tracking-[0px] md:text-5xl">{t('landing.platformsTitle')}</h2>
             <p className="mt-5 max-w-[54ch] text-base leading-7 text-[#cbd5e1]">{t('landing.platformsCopy')}</p>
-            <a href={actionsHref} className="mt-8 inline-flex h-11 items-center gap-2 rounded-lg border border-white/20 px-4 text-sm font-semibold text-white transition hover:border-white/40 hover:bg-white/10">
+            <a href={releaseHref} className="mt-8 inline-flex h-11 items-center gap-2 rounded-lg border border-white/20 px-4 text-sm font-semibold text-white transition hover:border-white/40 hover:bg-white/10">
               {t('landing.platformsCta')}
               <ArrowRight size={16} />
             </a>
           </div>
           <div className="divide-y divide-white/10 border-y border-white/10">
             {platformKeys.map((item) => (
-              <div key={item.label} className="grid grid-cols-[40px_minmax(0,1fr)] items-center gap-4 py-4">
+              <a key={item.label} href={item.href} className="group grid grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-4 py-4 transition hover:bg-white/5">
                 <div className="grid h-9 w-9 place-items-center rounded-lg bg-white text-[#2563eb]"><item.icon size={18} /></div>
                 <div className="min-w-0">
                   <h3 className="font-semibold text-white">{item.label}</h3>
                   <p className="mt-1 text-sm leading-6 text-[#94a3b8]">{t(item.detailKey)}</p>
                 </div>
-              </div>
+                <span className="inline-flex shrink-0 items-center gap-1 text-sm font-semibold text-[#93c5fd] transition group-hover:text-white">
+                  {t(item.actionKey)}
+                  <Download size={15} />
+                </span>
+              </a>
             ))}
           </div>
         </div>
@@ -221,7 +226,7 @@ export function LandingPage() {
           </div>
           <div className="flex flex-wrap gap-x-5 gap-y-2">
             <a className="hover:text-[#151a23]" href={appHref}>{t('landing.footerWebApp')}</a>
-            <a className="hover:text-[#151a23]" href={actionsHref}>{t('landing.footerArtifacts')}</a>
+            <a className="hover:text-[#151a23]" href={releaseHref}>{t('landing.footerArtifacts')}</a>
             <a className="hover:text-[#151a23]" href={repoHref}>{t('landing.footerSource')}</a>
           </div>
         </div>

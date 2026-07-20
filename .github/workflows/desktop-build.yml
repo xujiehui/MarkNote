@@ -156,3 +156,32 @@ jobs:
           path: ${{ matrix.patterns }}
           if-no-files-found: error
           retention-days: 30
+
+  release:
+    name: Publish GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: marknote-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          mapfile -t assets < <(find release-assets -type f \( -name '*.dmg' -o -name '*.zip' -o -name '*.exe' \) -print | sort)
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo "No desktop release assets were downloaded."
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
+            --title "MarkNote $GITHUB_REF_NAME" \
+            --generate-notes
