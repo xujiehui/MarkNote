@@ -148,10 +148,10 @@ Run `check:desktop-package` after `desktop:pack` to verify that `release/mac/Mar
 Current macOS outputs:
 
 - `release/mac/MarkNote.app`
-- `release/MarkNote-0.1.0-mac-x64.dmg`
-- `release/MarkNote-0.1.0-mac-x64.zip`
-- `release/MarkNote-0.1.0-mac-arm64.dmg`
-- `release/MarkNote-0.1.0-mac-arm64.zip`
+- `release/MarkNote-0.1.1-mac-x64.dmg`
+- `release/MarkNote-0.1.1-mac-x64.zip`
+- `release/MarkNote-0.1.1-mac-arm64.dmg`
+- `release/MarkNote-0.1.1-mac-arm64.zip`
 
 The local macOS build is unsigned because no valid Developer ID certificate is available in this environment. For public distribution, sign and notarize with an active Apple Developer ID certificate.
 
@@ -319,10 +319,10 @@ npm run dist:win
 当前 macOS 输出：
 
 - `release/mac/MarkNote.app`
-- `release/MarkNote-0.1.0-mac-x64.dmg`
-- `release/MarkNote-0.1.0-mac-x64.zip`
-- `release/MarkNote-0.1.0-mac-arm64.dmg`
-- `release/MarkNote-0.1.0-mac-arm64.zip`
+- `release/MarkNote-0.1.1-mac-x64.dmg`
+- `release/MarkNote-0.1.1-mac-x64.zip`
+- `release/MarkNote-0.1.1-mac-arm64.dmg`
+- `release/MarkNote-0.1.1-mac-arm64.zip`
 
 本地 macOS 构建未签名，因为当前环境没有可用的 Developer ID 证书。如需公开分发，请使用有效的 Apple Developer ID 证书进行签名和 notarize。
 
