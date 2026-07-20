@@ -5,6 +5,7 @@ import { readLocalEnv } from './sync-config.mjs';
 const root = process.argv[2] || 'dist';
 const localEnv = readLocalEnv();
 const configuredEndpoint = (localEnv.MARKNOTE_SYNC_CONFIG_URL || localEnv.VITE_SYNC_CONFIG_URL || '').trim();
+const requireSyncConfig = localEnv.MARKNOTE_REQUIRE_SYNC_CONFIG === '1';
 const supabaseProjectUrlPattern = /https:\/\/[a-z0-9]{20}\.supabase\.(?:co|in)/gi;
 const forbiddenPatterns = [
   { label: 'legacy Supabase environment variable', pattern: /(?:VITE|MARKNOTE)_SUPABASE_(?:URL|PUBLISHABLE_KEY|AUTH_REDIRECT_URL)/ },
@@ -15,13 +16,18 @@ const forbiddenPatterns = [
 if (!existsSync(root)) {
   throw new Error(`Distribution directory is missing: ${root}. Run npm run build first.`);
 }
+if (requireSyncConfig && !configuredEndpoint) {
+  throw new Error('Distribution requires cloud sync, but VITE_SYNC_CONFIG_URL is missing.');
+}
 
 const matches = [];
+let containsConfiguredEndpoint = false;
 for (const file of filesUnder(root)) {
   if (!/\.(?:html|js|css|json|map|svg|webmanifest)$/i.test(file)) {
     continue;
   }
   const content = readFileSync(file, 'utf8');
+  containsConfiguredEndpoint ||= Boolean(configuredEndpoint && content.includes(configuredEndpoint));
   if (containsUnapprovedSupabaseUrl(content, configuredEndpoint)) {
     matches.push(`${relative(root, file)}: Supabase project URL`);
   }
@@ -30,6 +36,10 @@ for (const file of filesUnder(root)) {
       matches.push(`${relative(root, file)}: ${label}`);
     }
   }
+}
+
+if (requireSyncConfig && !containsConfiguredEndpoint) {
+  throw new Error('Distribution requires cloud sync, but the configured backend endpoint is missing from the build.');
 }
 
 if (matches.length > 0) {

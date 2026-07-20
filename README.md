@@ -73,6 +73,8 @@ The current MarkNote project uses a public Supabase Storage object as that backe
 `https://wgagahicbbmqbqttedjy.supabase.co/storage/v1/object/public/marknote-config/sync-config.json`.
 Apply the `marknote-config` bucket migration, upload the JSON response above as `sync-config.json`, and set the same URL as the GitHub Actions repository variable `MARKNOTE_SYNC_CONFIG_URL`. The object must contain only the Supabase URL and publishable key; never upload a secret or service-role key. The bucket is public for reads, while uploads remain a privileged deployment operation.
 
+The GitHub Pages workflow requires that repository variable and verifies Google OAuth with `https://xujiehui.github.io/MarkNote/?app=1` as the web redirect. A Pages build now fails instead of publishing a local-only bundle when the variable is missing or the endpoint is absent from the generated assets. Add that exact Pages URL to Supabase Auth redirect URLs.
+
 Then apply the SQL in `supabase/migrations/202606190001_marknote_sync_schema.sql` to your Supabase project. You can print the migration for the Supabase SQL Editor with `npm run print:supabase-migration`.
 Also apply `supabase/migrations/202607180003_marknote_sync_config_bucket.sql` before uploading `sync-config.json`.
 
@@ -241,6 +243,8 @@ cp .env.example .env.local
 当前正确的 MarkNote 项目使用 Supabase Storage 公共 JSON 对象作为这个后端接口：
 `https://wgagahicbbmqbqttedjy.supabase.co/storage/v1/object/public/marknote-config/sync-config.json`。
 先应用 `marknote-config` bucket 迁移，再将上面的 JSON 作为 `sync-config.json` 上传，并把同一个 URL 设置为 GitHub Actions 仓库变量 `MARKNOTE_SYNC_CONFIG_URL`。对象只能包含 Supabase URL 和 publishable key，不能上传 secret 或 service-role key。bucket 只公开读取，上传仍是受保护的部署操作。
+
+GitHub Pages 工作流会强制读取这个仓库变量，并使用 `https://xujiehui.github.io/MarkNote/?app=1` 验证 Google OAuth 回跳。变量缺失或生成产物未包含配置 endpoint 时，Pages 构建会直接失败，不再发布仅本地模式的页面。Supabase Auth redirect URLs 中必须加入这个精确地址。
 
 GitHub Actions 不读取构建机上的 `.env.local`。要让 macOS/Windows 分发产物启用云同步，请在仓库的 Actions Variables 中设置 `MARKNOTE_SYNC_CONFIG_URL`；工作流会把它作为 `VITE_SYNC_CONFIG_URL` 传给 Vite。未设置时构建仍会成功，但产物明确运行在本地模式。
 

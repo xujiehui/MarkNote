@@ -15,7 +15,10 @@ if (config.provider !== 'supabase') {
   fail('Sync configuration is missing. Set VITE_SYNC_CONFIG_URL to the backend API endpoint.');
 }
 const supabaseUrl = config.supabase.url;
-const redirectTo = config.supabase.authRedirectUrl || 'http://127.0.0.1:5173/?app=1';
+const redirectTo =
+  env.MARKNOTE_SUPABASE_AUTH_REDIRECT_URL ||
+  config.supabase.authRedirectUrl ||
+  'http://127.0.0.1:5173/?app=1';
 
 let authorizeUrl;
 try {

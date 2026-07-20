@@ -55,6 +55,13 @@ assert.equal(successResult.status, 0, `${successResult.stdout}\n${successResult.
 assert.match(successResult.stdout, /Google OAuth provider is reachable/);
 assert.match(successResult.stdout, /Google Cloud authorized redirect URI: https:\/\/localhost\/auth\/v1\/callback/);
 
+const pagesRedirectUrl = 'https://xujiehui.github.io/MarkNote/?app=1';
+const pagesResult = runCheck(successPreloadPath, {
+  MARKNOTE_SUPABASE_AUTH_REDIRECT_URL: pagesRedirectUrl,
+});
+assert.equal(pagesResult.status, 0, `${pagesResult.stdout}\n${pagesResult.stderr}`);
+assert.match(pagesResult.stdout, new RegExp(`Redirect URL: ${escapeRegExp(pagesRedirectUrl)}`));
+
 const supabaseTlsPreloadPath = join(tempDir, 'supabase-tls-preload.cjs');
 writeFileSync(
   supabaseTlsPreloadPath,
@@ -156,7 +163,7 @@ assert.match(invalidClientResult.stderr, /https:\/\/localhost\/auth\/v1\/callbac
 
 console.log('google oauth check tests passed');
 
-function runCheck(preloadPath) {
+function runCheck(preloadPath, extraEnv = {}) {
   return spawnSync(process.execPath, ['--require', preloadPath, '--require', syncConfigPreloadPath, 'scripts/check-google-oauth.mjs'], {
     cwd: process.cwd(),
     encoding: 'utf8',
@@ -165,6 +172,11 @@ function runCheck(preloadPath) {
       ...syncConfigEnv,
       VITE_SUPABASE_URL: '',
       VITE_SUPABASE_AUTH_REDIRECT_URL: '',
+      ...extraEnv,
     },
   });
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
