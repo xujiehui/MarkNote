@@ -45,6 +45,9 @@ jobs:
       - name: Verify Pages cloud sync and OAuth
         run: npm run check:google-oauth
 
+      - name: Verify Supabase sync backend
+        run: npm run check:supabase-sync
+
       - name: Build site
         run: npm run build
 

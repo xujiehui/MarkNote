@@ -10,6 +10,7 @@ assert.match(
   /MARKNOTE_SUPABASE_AUTH_REDIRECT_URL: https:\/\/\$\{\{ github\.repository_owner \}\}\.github\.io\/\$\{\{ github\.event\.repository\.name \}\}\/\?app=1/,
 );
 assert.match(workflow, /- name: Verify Pages cloud sync and OAuth\s+run: npm run check:google-oauth/);
+assert.match(workflow, /- name: Verify Supabase sync backend\s+run: npm run check:supabase-sync/);
 assert.match(workflow, /- name: Build site\s+run: npm run build/);
 assert.match(workflow, /page_url: \$\{\{ steps\.deployment\.outputs\.page_url \}\}/);
 assert.match(workflow, /name: Verify deployed cloud sync/);

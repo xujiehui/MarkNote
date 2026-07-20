@@ -35,6 +35,7 @@ import { getFolderDisplayName, getTagDisplayName, useI18n } from './i18n';
 import { useSyncSession } from './sync/useSyncSession';
 import { syncDisplayError } from './sync/syncDisplayStatus';
 import { normalizeTags, TAG_PALETTE } from './lib/tags';
+import { resolveActiveNoteSelection } from './lib/activeNoteSelection';
 
 interface ContextState {
   note: Note;
@@ -135,6 +136,7 @@ function NoteWorkspace() {
   const syncError = syncDisplayError(sync.error, sync.backendCheck, { includeBackendCheck: Boolean(sync.session) });
   const searchInputRef = useRef<HTMLInputElement>(null);
   const activeNoteIdRef = useRef('');
+  const pendingActiveNoteIdRef = useRef('');
   const latestDraftRef = useRef({ noteId: '', title: '', content: '' });
   const debouncedQuery = useDebouncedValue(query, 180);
   const activeNote = notes.find((note) => note.id === activeNoteId);
@@ -449,11 +451,20 @@ function NoteWorkspace() {
   }, [activeFilter, activeFolder, t]);
 
   useEffect(() => {
-    if (activeNoteId && visibleNotes.some((note) => note.id === activeNoteId)) {
+    const nextActiveNoteId = resolveActiveNoteSelection({
+      activeNoteId,
+      pendingNoteId: pendingActiveNoteIdRef.current,
+      notes,
+      visibleNotes,
+    });
+    if (pendingActiveNoteIdRef.current && notes.some((note) => note.id === pendingActiveNoteIdRef.current)) {
+      pendingActiveNoteIdRef.current = '';
+    }
+    if (nextActiveNoteId === activeNoteId) {
       return;
     }
-    setActiveNoteId(visibleNotes[0]?.id || '');
-  }, [activeNoteId, visibleNotes]);
+    setActiveNoteId(nextActiveNoteId);
+  }, [activeNoteId, notes, visibleNotes]);
 
   useEffect(() => {
     if (!activeNoteId || !notes.some((note) => note.id === activeNoteId && !note.deletedAt)) {
@@ -520,6 +531,7 @@ function NoteWorkspace() {
   const createNewNote = useCallback(async () => {
     const folderId = activeFilter.startsWith('folder:') ? activeFilter.slice('folder:'.length) : DEFAULT_FOLDER_ID;
     const note = await createNote({ title: t('note.untitled'), content: '<p></p>', folderId });
+    pendingActiveNoteIdRef.current = note.id;
     setActiveFilter(`folder:${folderId}`);
     setActiveNoteId(note.id);
   }, [activeFilter, t]);
@@ -726,6 +738,7 @@ function NoteWorkspace() {
           tags: item.note?.tags || item.tags || [],
         };
         const note = item.note ? await upsertNote(noteInput) : await createNote(noteInput);
+        pendingActiveNoteIdRef.current = note.id;
         setActiveFilter(`folder:${activeFolderId}`);
         setActiveNoteId(note.id);
       }

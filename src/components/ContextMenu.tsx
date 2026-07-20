@@ -2,6 +2,10 @@ import { Copy, Download, Folder, Pin, Tags, Trash2 } from 'lucide-react';
 import { getFolderDisplayName, getTagDisplayName, useI18n } from '../i18n';
 import type { ExportFormat, Folder as NoteFolder, Note } from '../types';
 import { tagDotStyle } from '../lib/tags';
+import { clampContextMenuPosition } from '../lib/contextMenuPosition';
+
+const MENU_WIDTH = 224;
+const MENU_GAP = 8;
 
 interface ContextMenuState {
   note: Note;
@@ -26,10 +30,22 @@ interface ContextMenuProps {
 export function ContextMenu({ state, folders, tags, tagColors, onTogglePin, onCopy, onExport, onDelete, onToggleTag, onMoveToFolder }: ContextMenuProps) {
   const { t } = useI18n();
   const { note, x, y } = state;
+  const viewport = getViewportSize();
+  const estimatedHeight = 72 + 133 + 29 + folders.length * 32 + 29 + tags.length * 32 + 37;
+  const maxHeight = Math.max(0, viewport.height - MENU_GAP * 2);
+  const position = clampContextMenuPosition({
+    x,
+    y,
+    menuWidth: MENU_WIDTH,
+    menuHeight: Math.min(estimatedHeight, maxHeight),
+    viewportWidth: viewport.width,
+    viewportHeight: viewport.height,
+    gap: MENU_GAP,
+  });
   return (
     <div
-      className="fixed z-50 w-56 overflow-hidden rounded-lg border border-[#e5e7eb] bg-white py-1 text-sm shadow-[0_18px_45px_rgba(15,23,42,0.16)]"
-      style={{ left: x, top: y }}
+      className="fixed z-50 w-56 overflow-x-hidden overflow-y-auto rounded-lg border border-[#e5e7eb] bg-white py-1 text-sm shadow-[0_18px_45px_rgba(15,23,42,0.16)]"
+      style={{ left: position.left, top: position.top, maxHeight }}
     >
       <button
         type="button"
@@ -107,11 +123,18 @@ export function ContextMenu({ state, folders, tags, tagColors, onTogglePin, onCo
       <button
         type="button"
         onClick={() => onDelete(note)}
-        className="flex h-9 w-full items-center gap-2 border-t border-[#eef0f3] px-3 text-left text-[#ef4444] hover:bg-[#f3f4f6]"
+        className="sticky bottom-0 flex h-9 w-full items-center gap-2 border-t border-[#eef0f3] bg-white px-3 text-left text-[#ef4444] hover:bg-[#f3f4f6]"
       >
         <Trash2 size={15} />
         {t('context.delete')}
       </button>
     </div>
   );
+}
+
+function getViewportSize(): { width: number; height: number } {
+  if (typeof window === 'undefined') {
+    return { width: MENU_WIDTH + MENU_GAP * 2, height: 600 };
+  }
+  return { width: window.innerWidth, height: window.innerHeight };
 }

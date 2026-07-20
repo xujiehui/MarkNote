@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { resolveActiveNoteSelection } from '../src/lib/activeNoteSelection';
+import { clampContextMenuPosition } from '../src/lib/contextMenuPosition';
 import { isDraftSaveSnapshotCurrent, resolveActiveNoteDraftValue, shouldResetActiveNoteDraftMeta } from '../src/lib/editorDraft';
 
 function main() {
@@ -12,6 +14,37 @@ function main() {
     'typing in progress',
   );
   assert.equal(shouldResetActiveNoteDraftMeta(false, true), false);
+
+  assert.equal(
+    resolveActiveNoteSelection({
+      activeNoteId: 'new-note',
+      pendingNoteId: 'new-note',
+      notes: [{ id: 'welcome-note' }],
+      visibleNotes: [{ id: 'welcome-note' }],
+    }),
+    'new-note',
+  );
+  assert.equal(
+    resolveActiveNoteSelection({
+      activeNoteId: 'outside-filter',
+      pendingNoteId: '',
+      notes: [{ id: 'outside-filter' }, { id: 'visible-note' }],
+      visibleNotes: [{ id: 'visible-note' }],
+    }),
+    'visible-note',
+  );
+
+  assert.deepEqual(
+    clampContextMenuPosition({
+      x: 1200,
+      y: 700,
+      menuWidth: 224,
+      menuHeight: 732,
+      viewportWidth: 1280,
+      viewportHeight: 720,
+    }),
+    { left: 1048, top: 8 },
+  );
 
   assert.equal(
     resolveActiveNoteDraftValue({
