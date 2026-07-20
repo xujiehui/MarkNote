@@ -227,7 +227,19 @@ export function Sidebar({
   }
 
   return (
-    <aside className={`grid h-full shrink-0 grid-rows-[auto_1fr_auto] border-r border-[#e5e7eb] bg-[#f5f6f8] transition-[width] duration-300 ${collapsed ? 'w-[76px]' : 'w-[270px]'}`}>
+    <aside className={`relative grid h-full shrink-0 grid-rows-[auto_1fr_auto] border-r border-[#e5e7eb] bg-[#f5f6f8] transition-[width] duration-300 ${collapsed ? 'w-[76px]' : 'w-[270px]'}`}>
+      {collapsed ? (
+        <button
+          type="button"
+          onClick={onTogglePanel}
+          className="absolute right-[-14px] top-6 z-30 grid h-7 w-7 place-items-center rounded-full border border-[#d7dce5] bg-white text-[#374151] shadow-[0_4px_14px_rgba(15,23,42,0.12)] outline-none transition hover:border-[#b9c3d4] hover:bg-[#f8fafc] focus-visible:ring-2 focus-visible:ring-[#2f7df6]/30"
+          title={t('sidebar.expandSidebar')}
+          aria-label={t('sidebar.expandSidebar')}
+          data-testid="sidebar-expand-button"
+        >
+          <ChevronRight size={17} />
+        </button>
+      ) : null}
       <div className="min-w-0 px-5 pt-4">
         <div className="marknote-fake-traffic-lights mb-3 flex h-4 items-center gap-2">
           <span className="h-3.5 w-3.5 rounded-full bg-[#ff5f57] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)]" />
@@ -477,7 +489,7 @@ export function Sidebar({
         </div>
       </div>
 
-      <div className="min-w-0 p-5">
+      <div className={`min-w-0 ${collapsed ? 'px-3 pb-4' : 'p-5'}`}>
         <div className={`relative mb-4 rounded-xl border border-[#e4e7ed] bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] ${collapsed ? 'hidden' : ''}`}>
           {syncPanelOpen ? (
             <div className="absolute bottom-[calc(100%+10px)] left-0 right-0 z-50" onClick={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()}>
@@ -524,7 +536,10 @@ export function Sidebar({
             <div className="h-full rounded-full bg-[#2f7df6]" style={{ width: `${storagePercent}%` }} />
           </div>
         </div>
-        <div className="flex items-center justify-between px-2 text-[#374151]">
+        <div
+          className={collapsed ? 'flex flex-col items-center gap-2 text-[#374151]' : 'flex items-center justify-between px-2 text-[#374151]'}
+          data-testid="sidebar-footer-actions"
+        >
           <div className="relative">
             <button
               type="button"
@@ -577,9 +592,11 @@ export function Sidebar({
           >
             <HelpCircle size={19} />
           </button>
-          <button type="button" onClick={onTogglePanel} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white" title={collapsed ? t('sidebar.expandSidebar') : t('sidebar.collapseSidebar')} aria-label={collapsed ? t('sidebar.expandSidebar') : t('sidebar.collapseSidebar')}>
-            {collapsed ? <ChevronRight size={19} /> : <ChevronLeft size={19} />}
-          </button>
+          {!collapsed ? (
+            <button type="button" onClick={onTogglePanel} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white" title={t('sidebar.collapseSidebar')} aria-label={t('sidebar.collapseSidebar')}>
+              <ChevronLeft size={19} />
+            </button>
+          ) : null}
         </div>
         {notice ? <div className="mt-2 rounded-lg bg-[#111827] px-3 py-2 text-xs text-white">{notice}</div> : null}
       </div>
