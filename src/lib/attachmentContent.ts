@@ -10,13 +10,17 @@ export function attachmentIdFromRefUrl(value: string | undefined | null): string
   if (!value?.startsWith(ATTACHMENT_REF_PREFIX)) {
     return '';
   }
-  return decodeURIComponent(value.slice(ATTACHMENT_REF_PREFIX.length));
+  try {
+    return decodeURIComponent(value.slice(ATTACHMENT_REF_PREFIX.length));
+  } catch {
+    return '';
+  }
 }
 
 export function replaceAttachmentDataUrlsWithRefs(content: string): string {
   return transformAttachmentContent(content, ({ element, attachmentId, attribute }) => {
     const value = element.getAttribute(attribute) || '';
-    if (value.startsWith('data:')) {
+    if (value.startsWith('data:') || value.startsWith('blob:')) {
       element.setAttribute(attribute, attachmentRefUrl(attachmentId));
     }
   });
@@ -37,6 +41,7 @@ export function restoreAttachmentRefs(content: string, attachments: Iterable<Ima
     const data = dataById.get(attachmentId);
     if (data && attachmentIdFromRefUrl(value) === attachmentId) {
       element.setAttribute(attribute, data);
+      if (attribute !== 'poster') element.setAttribute('data-attachment-id', attachmentId);
     }
   });
 }
@@ -62,27 +67,27 @@ function transformAttachmentContent(
 
   const doc = new DOMParser().parseFromString(content, 'text/html');
   let changed = false;
-  doc.querySelectorAll('[data-attachment-id]').forEach((element) => {
-    const attachmentId = element.getAttribute('data-attachment-id') || '';
-    const attribute = attachmentSourceAttribute(element);
-    if (!attachmentId || !attribute) {
-      return;
+  doc.querySelectorAll('[data-attachment-id], img[src], video[src], video[poster], audio[src], source[src], a[download][href], file-attachment[href]').forEach((element) => {
+    for (const attribute of attachmentSourceAttributes(element)) {
+      const attachmentId = attachmentIdFromRefUrl(element.getAttribute(attribute)) || (attribute === 'poster' ? '' : element.getAttribute('data-attachment-id')) || '';
+      if (!attachmentId) continue;
+      const before = element.getAttribute(attribute);
+      transform({ element, attachmentId, attribute });
+      changed = changed || before !== element.getAttribute(attribute);
     }
-    const before = element.getAttribute(attribute);
-    transform({ element, attachmentId, attribute });
-    changed = changed || before !== element.getAttribute(attribute);
   });
 
   return changed ? doc.body.innerHTML : content;
 }
 
-function attachmentSourceAttribute(element: Element): string {
+function attachmentSourceAttributes(element: Element): string[] {
   const tag = element.tagName.toLowerCase();
-  if (tag === 'img' || tag === 'video' || tag === 'audio') {
-    return 'src';
+  if (tag === 'video') return ['src', 'poster'];
+  if (tag === 'img' || tag === 'audio' || tag === 'source') {
+    return ['src'];
   }
-  if (tag === 'file-attachment') {
-    return 'href';
+  if (tag === 'file-attachment' || (tag === 'a' && element.hasAttribute('download'))) {
+    return ['href'];
   }
-  return '';
+  return [];
 }

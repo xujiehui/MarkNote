@@ -11,3 +11,6 @@ release
 !.env.example
 .marknote-sync-config.tmp.json
 /index-*.js
+
+/playwright-report/
+/test-results/

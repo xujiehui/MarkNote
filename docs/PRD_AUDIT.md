@@ -1,6 +1,9 @@
 # MarkNote PRD Audit
 
-This audit maps the requested PRD to current implementation evidence.
+This is a historical audit of an earlier implementation. It is not a current
+release acceptance report; its dependency, runtime, import and packaging claims
+must not be reused for the present working tree. Current implementation and
+validation boundaries are recorded in [REMEDIATION_STATUS.md](REMEDIATION_STATUS.md).
 
 ## Delivery Shape
 
@@ -77,7 +80,7 @@ This audit maps the requested PRD to current implementation evidence.
 
 ## Verification
 
-Latest verified commands:
+Commands recorded by the historical audit:
 
 ```bash
 npm run lint
@@ -87,8 +90,8 @@ npm run dist:mac
 npm audit
 ```
 
-Current audit status: `found 0 vulnerabilities`.
-Latest build confirms separate lazy chunks for `importExport`, `html2canvas`, and `jspdf`.
+Audit status recorded at that time: `found 0 vulnerabilities` (not the current dependency result).
+That build recorded separate lazy chunks for `importExport`, `html2canvas`, and `jspdf`.
 Packaged app launch check: `open release/mac/MarkNote.app` succeeded, and System Events reported a running `MarkNote` process.
 
 ## Known Caveats

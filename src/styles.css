@@ -1,6 +1,5 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@config "../tailwind.config.js";
 
 * {
   box-sizing: border-box;
@@ -67,8 +66,23 @@ button {
   cursor: default;
 }
 
-.marknote-shell .marknote-fake-traffic-lights {
-  visibility: hidden;
+.marknote-workspace :where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--primary-500);
+  outline-offset: 2px;
+}
+
+.mobile-navigation,
+.mobile-sidebar-backdrop {
+  display: none;
+}
+
+.marknote-workspace .note-list {
+  width: clamp(260px, 25vw, 360px);
+}
+
+.editor-formatting-toolbar {
+  flex-wrap: wrap;
+  overflow: visible;
 }
 
 ::selection {
@@ -662,6 +676,149 @@ button {
 @media (max-width: 1439px) {
   .prose-editor {
     max-width: 760px;
+  }
+}
+
+@media (max-width: 1279px) {
+  .marknote-workspace {
+    width: 100%;
+    height: 100dvh;
+  }
+
+  .mobile-navigation {
+    display: flex;
+    height: 52px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    border-bottom: 1px solid var(--gray-200);
+    background: var(--gray-50);
+    padding: 6px 12px;
+  }
+
+  .mobile-navigation button {
+    min-height: 40px;
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 14px;
+  }
+
+  .workspace-columns {
+    height: calc(100% - 52px);
+    width: 100%;
+  }
+
+  .workspace-columns > .workspace-sidebar {
+    position: fixed;
+    top: 52px;
+    left: 0;
+    z-index: 60;
+    display: none;
+    width: min(320px, calc(100vw - 40px));
+    height: calc(100dvh - 52px);
+    box-shadow: 12px 0 40px rgba(15, 23, 42, 0.18);
+  }
+
+  .mobile-sidebar-open .workspace-columns > .workspace-sidebar {
+    display: grid;
+  }
+
+  .mobile-sidebar-open .mobile-sidebar-backdrop {
+    position: fixed;
+    inset: 52px 0 0;
+    z-index: 50;
+    display: block;
+    width: 100%;
+    background: rgba(15, 23, 42, 0.4);
+  }
+
+  .marknote-workspace .note-list {
+    width: 100%;
+    border-right: 0;
+  }
+
+  .mobile-pane-list .workspace-columns > main,
+  .mobile-pane-editor .workspace-columns > .note-list {
+    display: none;
+  }
+
+  .workspace-columns > main {
+    width: 100%;
+  }
+
+  .workspace-columns > main > header {
+    padding: 12px 16px 8px;
+  }
+
+  .workspace-columns > main > header > div:first-child {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .workspace-columns > main > header > div:first-child > div:first-child {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .workspace-columns > main > header input {
+    max-width: 100%;
+  }
+
+  .workspace-columns > main > section {
+    padding: 16px 20px 64px;
+  }
+
+  .workspace-columns > main > footer {
+    min-width: 0;
+    gap: 6px;
+    padding-right: 12px;
+    padding-left: 12px;
+    font-size: 11px;
+  }
+
+  .workspace-columns > main > header .absolute {
+    max-width: calc(100vw - 32px);
+  }
+
+  .prose-editor {
+    width: 100%;
+    overflow-wrap: anywhere;
+    font-size: 16px;
+  }
+
+  .prose-editor h1 {
+    font-size: 30px;
+  }
+
+  .marknote-dark .mobile-navigation {
+    border-color: #374151;
+    background: #111827;
+  }
+}
+
+@media (min-width: 961px) and (max-width: 1279px) {
+  .marknote-workspace .note-list {
+    width: 320px;
+    border-right: 1px solid var(--gray-200);
+  }
+
+  .mobile-pane-list .workspace-columns > main,
+  .mobile-pane-editor .workspace-columns > .note-list {
+    display: grid;
+  }
+
+  .workspace-columns > main {
+    width: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marknote-workspace *,
+  .marknote-workspace *::before,
+  .marknote-workspace *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
 

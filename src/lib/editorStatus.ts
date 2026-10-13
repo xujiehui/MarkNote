@@ -1,6 +1,6 @@
 import { isSyncCurrent } from '../sync/syncDisplayStatus';
 
-export type LocalSaveState = 'idle' | 'saving' | 'saved';
+export type LocalSaveState = 'idle' | 'saving' | 'saved' | 'error';
 
 export interface EditorStatusInput {
   saveState: LocalSaveState;
@@ -14,13 +14,13 @@ export interface EditorStatusInput {
   syncQueueFailed?: number;
 }
 
-export type EditorStatusKind = 'saving' | 'syncing' | 'syncFailed' | 'saved' | 'localSaved';
+export type EditorStatusKind = 'saving' | 'saveFailed' | 'syncing' | 'syncFailed' | 'saved' | 'localSaved';
 
 export interface EditorStatus {
   kind: EditorStatusKind;
   tone: 'success' | 'warning' | 'error' | 'muted';
   canRetrySync: boolean;
-  messageKey: 'editor.saveSaving' | 'editor.saveSaved' | 'editor.localSaved' | 'sync.syncing' | 'sync.failed';
+  messageKey: 'editor.saveSaving' | 'editor.saveFailed' | 'editor.saveSaved' | 'editor.localSaved' | 'sync.syncing' | 'sync.failed';
 }
 
 export function resolveEditorStatus({
@@ -34,6 +34,9 @@ export function resolveEditorStatus({
   syncQueuePending = 0,
   syncQueueFailed = 0,
 }: EditorStatusInput): EditorStatus {
+  if (saveState === 'error') {
+    return { kind: 'saveFailed', tone: 'error', canRetrySync: false, messageKey: 'editor.saveFailed' };
+  }
   if (saveState === 'saving') {
     return {
       kind: 'saving',

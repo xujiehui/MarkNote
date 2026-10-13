@@ -1,0 +1,48 @@
+{
+  "checkedOn": "2026-10-13",
+  "timezone": "Asia/Shanghai",
+  "lockfileSha256": "1a0331aa5b175b2bf4ef51e1af826f68d6a6f4d8ca8712c508cceafa188224a9",
+  "node": "v24.19.0",
+  "npm": "11.9.0",
+  "affectedBuildPath": [
+    {
+      "path": "node_modules/electron-builder",
+      "version": "26.15.3",
+      "dev": true,
+      "optional": false
+    },
+    {
+      "path": "node_modules/app-builder-lib",
+      "version": "26.15.3",
+      "dev": true,
+      "optional": false
+    },
+    {
+      "path": "node_modules/app-builder-lib/node_modules/@electron/get",
+      "version": "3.1.0",
+      "dev": true,
+      "optional": false
+    },
+    {
+      "path": "node_modules/global-agent",
+      "version": "3.0.0",
+      "dev": true,
+      "optional": true
+    },
+    {
+      "path": "node_modules/roarr",
+      "version": "2.15.4",
+      "dev": true,
+      "optional": true
+    },
+    {
+      "path": "node_modules/sprintf-js",
+      "version": "1.1.3",
+      "dev": true,
+      "optional": true
+    }
+  ],
+  "directAdvisories": [
+    "https://github.com/advisories/GHSA-hp3w-g68c-fv3c"
+  ]
+}

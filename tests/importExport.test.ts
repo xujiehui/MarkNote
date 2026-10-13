@@ -55,6 +55,10 @@ console.log('ok')
   assert.match(exported, /^# 导出标题/);
   assert.match(exported, /!\[截图\]\(data:image\/png;base64,iVBORw0KGgo=\)/);
   assert.match(exported, /```javascript\nconsole\.log\('ok'\)\n```/);
+  const escapedTitle = noteToMarkdown({ title: '<img src=x onerror=bad()>\n# extra', content: '<p>safe</p>' });
+  assert.doesNotMatch(escapedTitle, /^# <img|\n# extra/);
+  const safeMarkdownHtml = await parseImportFile(new File([escapedTitle], 'safe-title.md', { type: 'text/markdown' }));
+  assert.equal(new DOMParser().parseFromString(safeMarkdownHtml[0].content, 'text/html').querySelector('img'), null);
 
   const html = noteHtmlDocument(note.title, note.content);
   assert.match(html, /src="data:image\/png;base64,iVBORw0KGgo="/);

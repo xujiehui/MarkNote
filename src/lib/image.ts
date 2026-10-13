@@ -1,17 +1,29 @@
+import { isSafeRasterImageMimeType, MAX_ATTACHMENT_BYTES } from './sanitizeContent';
+
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 const MAX_IMAGE_WIDTH = 1200;
+const MAX_IMAGE_PIXELS = 20_000_000;
 const JPEG_QUALITY = 0.8;
 
 export async function fileToBase64Image(file: File): Promise<string> {
-  if (!file.type.startsWith('image/')) {
-    throw new Error('请选择图片文件。');
+  if (!isSafeRasterImageMimeType(file.type)) {
+    throw new Error('仅支持 PNG、JPEG、GIF、WebP、BMP 或 AVIF 图片；不支持 SVG。');
   }
-
-  if (file.size <= MAX_IMAGE_BYTES) {
-    return readFileAsDataUrl(file);
+  if (file.size === 0 || file.size > MAX_ATTACHMENT_BYTES) {
+    throw new Error('图片不能为空，且文件大小不能超过 20MB。');
   }
+  const dataUrl = await readFileAsDataUrl(file);
+  const image = await loadImage(dataUrl);
+  validateImageDimensions(image.naturalWidth, image.naturalHeight);
+  if (file.size <= MAX_IMAGE_BYTES && Math.max(image.naturalWidth, image.naturalHeight) <= MAX_IMAGE_WIDTH) return dataUrl;
+  return compressImage(image, file.type);
+}
 
-  return compressImage(file);
+export function validateImageDimensions(width: number, height: number): void {
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
+    throw new Error('图片格式无效或无法解码。');
+  }
+  if (width * height > MAX_IMAGE_PIXELS) throw new Error('图片不能超过 2000 万像素，请先缩小图片。');
 }
 
 export function readFileAsDataUrl(file: File): Promise<string> {
@@ -23,21 +35,20 @@ export function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
-async function compressImage(file: File): Promise<string> {
-  const dataUrl = await readFileAsDataUrl(file);
-  const image = await loadImage(dataUrl);
-  const scale = Math.min(1, MAX_IMAGE_WIDTH / image.naturalWidth);
+function compressImage(image: HTMLImageElement, mimeType: string): string {
+  const scale = Math.min(1, MAX_IMAGE_WIDTH / Math.max(image.naturalWidth, image.naturalHeight));
   const canvas = document.createElement('canvas');
   canvas.width = Math.round(image.naturalWidth * scale);
   canvas.height = Math.round(image.naturalHeight * scale);
 
   const context = canvas.getContext('2d');
   if (!context) {
-    return dataUrl;
+    throw new Error('浏览器无法处理图片，请缩小后重试。');
   }
 
   context.drawImage(image, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL('image/jpeg', JPEG_QUALITY);
+  // WebP preserves transparency; forcing every image to JPEG produced black backgrounds.
+  return canvas.toDataURL(mimeType === 'image/jpeg' ? 'image/jpeg' : 'image/webp', JPEG_QUALITY);
 }
 
 function loadImage(src: string): Promise<HTMLImageElement> {

@@ -1,0 +1,82 @@
+
+> marknote@0.1.1 test
+> node scripts/prepare-tests.mjs && tsc -p tsconfig.test.json && node scripts/run-tests.mjs
+
+attachment content tests passed
+backend check result tests passed
+backend check storage tests passed
+backend verification tests passed
+backup integrity/atomic restore tests passed
+local conflict attachment clone tests passed (two tabs, source purge, independent backup, missing-byte rollback)
+code block focus tests passed
+code block utils tests passed
+content security tests passed
+db tests passed
+desktop oauth callback tests passed
+editor canvas focus tests passed
+editor draft tests passed
+editor draft storage tests passed
+editor status tests passed
+editor sync action tests passed
+editor task list tests passed
+electron auth callback tests passed
+electron security tests passed
+import preflight/failure/focus tests passed
+import/export tests passed
+Indexed search hook stale-prop, StrictMode disposal and unsupported-worker fallback tests passed
+legacy history migration tests passed
+note history tests passed
+Note list native selection, action separation and measured viewport tests passed
+note save tests passed
+Note save database tests passed (two-tab CAS, conflict retention, drafts, atomic queue/history)
+oauth callback tests passed
+PWA update persistence guard and application error recovery tests passed
+emergency read-only recovery export tests passed (orphan/foreign/legacy/memory, missing media, import, no credentials)
+Incremental indexed substring search, generation/sequence guards and 10k cancellation tests passed
+session change tests passed
+sidebar collapse tests passed
+storage usage tests passed
+Supabase adapter tests passed
+supabase error tests passed
+sync tests passed (versioned ACK races, conflict copies, purge, paging, identity, attachments)
+sync auto-sync tests passed
+sync config tests passed
+sync display status tests passed
+sync panel diagnostics tests passed
+sync session status tests passed
+Warning: An update to Harness inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at Harness (/workspace/MarkNote/.tmp-tests/tests/useSyncSession.test.js:118:72)
+sync session integration tests passed (diagnostic loop, bounded retries, idle pull, identity switch)
+workspace isolation tests passed
+workspace lightweight read-model tests passed (1000 note/attachment records)
+Desktop archive discovery, lazy chunk integrity, security and release-check tests passed
+distribution config tests passed
+google oauth check tests passed
+package scripts tests passed
+pages deployment check tests passed
+pages workflow tests passed
+PWA offline, artifact integrity, update and private-cache regression tests passed
+Shared CI quality and pinned toolchain tests passed
+Search worker 10k query cancellation, incremental update and generation regression tests passed
+PWA runtime readiness and explicit safe-update tests passed
+supabase migration tests passed
+Supabase migration apply tests passed (v2 gates, dry run, atomic apply, blocked credentials).
+supabase readiness check tests passed
+supabase sync check tests passed
+sync config script tests passed
+Sync protocol PostgreSQL tests passed (CAS, replay, paging, auth, rollback, purge, storage GC).
+Test suites: 61/61 passed
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

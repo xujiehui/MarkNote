@@ -8,7 +8,7 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "tsc -b tsconfig.app.json tsconfig.node.json && vite build && node scripts/check-distribution-config.mjs",
+    "build": "tsc -b tsconfig.app.json tsconfig.node.json && vite build && node scripts/generate-pwa-precache.mjs && node scripts/check-distribution-config.mjs",
     "build:electron": "tsc -p tsconfig.electron.json",
     "desktop:dev": "npm run build:electron && VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
     "desktop:build": "npm run build && npm run build:electron",
@@ -35,11 +35,12 @@
     "check:pages-deployment": "node scripts/check-pages-deployment.mjs",
     "print:supabase-migration": "node scripts/print-supabase-migration.mjs",
     "print:supabase-readiness-check": "node scripts/print-supabase-readiness-check.mjs",
-    "verify:release:local": "npm test && npm run desktop:pack && npm run check:desktop-package",
+    "verify:release:local": "npm run lint && npm test && npm run test:e2e && npm run desktop:pack && npm run check:desktop-package",
     "verify:release:online": "npm run check:google-oauth && npm run check:supabase-migration && npm run check:supabase-sync:oauth",
     "verify:release:online:manual": "npm run check:google-oauth && npm run check:supabase-sync:oauth",
     "verify:release:online:apply": "npm run check:google-oauth && npm run apply:supabase-migration && npm run check:supabase-sync:oauth",
-    "test": "tsc -p tsconfig.test.json && node -e \"require('fs').writeFileSync('.tmp-tests/package.json','{\\\"type\\\":\\\"commonjs\\\"}')\" && node .tmp-tests/tests/importExport.test.js && node .tmp-tests/tests/db.test.js && node .tmp-tests/tests/sync.test.js && node .tmp-tests/tests/syncConfig.test.js && node .tmp-tests/tests/oauthCallback.test.js && node .tmp-tests/tests/electronAuthCallback.test.js && node .tmp-tests/tests/desktopOAuthCallback.test.js && node .tmp-tests/tests/editorDraft.test.js && node .tmp-tests/tests/editorStatus.test.js && node .tmp-tests/tests/editorTaskList.test.js && node .tmp-tests/tests/codeBlockFocus.test.js && node .tmp-tests/tests/codeBlockUtils.test.js && node .tmp-tests/tests/editorCanvasFocus.test.js && node .tmp-tests/tests/editorSyncActions.test.js && node .tmp-tests/tests/sidebarCollapse.test.js && node .tmp-tests/tests/attachmentContent.test.js && node .tmp-tests/tests/storageUsage.test.js && node .tmp-tests/tests/backendCheckStorage.test.js && node .tmp-tests/tests/backendCheckResult.test.js && node .tmp-tests/tests/backendVerification.test.js && node .tmp-tests/tests/syncDisplayStatus.test.js && node .tmp-tests/tests/syncAutoSync.test.js && node .tmp-tests/tests/syncSessionStatus.test.js && node .tmp-tests/tests/sessionChange.test.js && node .tmp-tests/tests/syncPanelDiagnostics.test.js && node .tmp-tests/tests/supabaseError.test.js && node .tmp-tests/tests/supabaseAdapter.test.js && node tests/packageScripts.test.cjs && node tests/syncConfigScript.test.cjs && node tests/distributionConfig.test.cjs && node tests/pagesWorkflow.test.cjs && node tests/pagesDeploymentCheck.test.cjs && node tests/supabaseMigration.test.cjs && node tests/supabaseMigrationApply.test.cjs && node tests/supabaseReadinessCheck.test.cjs && node tests/googleOAuthCheck.test.cjs && node tests/supabaseSyncCheck.test.cjs"
+    "test": "node scripts/prepare-tests.mjs && tsc -p tsconfig.test.json && node scripts/run-tests.mjs",
+    "test:e2e": "npm run build && playwright test"
   },
   "build": {
     "appId": "com.marknote.app",
@@ -86,15 +87,18 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.108.2",
-    "@tiptap/core": "^2.26.1",
-    "@tiptap/extension-image": "^2.26.1",
-    "@tiptap/extension-placeholder": "^2.26.1",
-    "@tiptap/extension-task-item": "^2.26.1",
-    "@tiptap/extension-task-list": "^2.26.1",
-    "@tiptap/react": "^2.26.1",
-    "@tiptap/starter-kit": "^2.26.1",
+    "@tiptap/core": "3.31.4",
+    "@tiptap/extension-image": "3.31.4",
+    "@tiptap/extension-placeholder": "3.31.4",
+    "@tiptap/extension-table": "3.31.4",
+    "@tiptap/extension-task-item": "3.31.4",
+    "@tiptap/extension-task-list": "3.31.4",
+    "@tiptap/pm": "3.31.4",
+    "@tiptap/react": "3.31.4",
+    "@tiptap/starter-kit": "3.31.4",
     "dexie": "^4.2.1",
     "dexie-react-hooks": "^1.1.7",
+    "dompurify": "3.4.17",
     "file-saver": "^2.0.5",
     "highlight.js": "^11.11.1",
     "html2canvas": "^1.4.1",
@@ -109,6 +113,9 @@
     "turndown": "^7.2.1"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.3.14",
+    "@playwright/test": "1.64.0",
+    "@tailwindcss/postcss": "4.3.3",
     "@types/file-saver": "^2.0.7",
     "@types/jsdom": "^28.0.3",
     "@types/node": "^22.15.34",
@@ -121,16 +128,20 @@
     "@typescript-eslint/parser": "^8.35.0",
     "@vitejs/plugin-react": "^6.0.2",
     "autoprefixer": "^10.4.21",
-    "electron": "^42.4.1",
+    "electron": "44.7.0",
     "electron-builder": "^26.15.3",
     "eslint": "^9.29.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",
     "fake-indexeddb": "^6.2.5",
     "jsdom": "^29.1.1",
-    "postcss": "^8.5.6",
-    "tailwindcss": "^3.4.17",
+    "postcss": "8.5.30",
+    "tailwindcss": "4.3.3",
     "typescript": "^5.8.3",
     "vite": "^8.0.16"
+  },
+  "engines": {
+    "node": ">=24.19.0 <25",
+    "npm": ">=11 <12"
   }
 }

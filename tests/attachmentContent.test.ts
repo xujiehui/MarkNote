@@ -47,4 +47,19 @@ const restored = restoreAttachmentRefs(remote, [
 assert.equal(restored.includes(imageData), true);
 assert.equal(restored.includes(pdfData), true);
 
+const downloadLink = `<a href="${pdfData}" download="brief.pdf" data-attachment-id="file-1">附件</a>`;
+const remoteLink = replaceAttachmentDataUrlsWithRefs(downloadLink);
+assert.equal(remoteLink.includes(pdfData), false, 'download links must use stable refs during sync');
+assert.equal(restoreAttachmentRefs(remoteLink, [{ id: 'file-1', noteId: 'note-1', data: pdfData, mimeType: 'application/pdf' }]).includes(pdfData), true);
+assert.deepEqual(Array.from(extractAttachmentRefIds(`<a href="${attachmentRefUrl('file-1')}" download>文件</a>`)), ['file-1']);
+assert.equal(attachmentIdFromRefUrl('marknote-attachment://%E0%A4'), '', 'malformed percent encodings cannot crash loading');
+const sourceElement = `<audio controls><source src="marknote-attachment://audio-1" type="audio/mpeg"></audio>`;
+assert.deepEqual(Array.from(extractAttachmentRefIds(sourceElement)), ['audio-1']);
+assert.match(restoreAttachmentRefs(sourceElement, [{ id: 'audio-1', noteId: 'note-1', data: 'data:audio/mpeg;base64,aGVsbG8=', mimeType: 'audio/mpeg' }]), /data:audio\/mpeg;base64,aGVsbG8=/);
+const withPoster = '<video src="marknote-attachment://video-1" poster="marknote-attachment://image-1" data-attachment-id="video-1"></video>';
+assert.deepEqual(Array.from(extractAttachmentRefIds(withPoster)).sort(), ['image-1', 'video-1']);
+const restoredPoster = restoreAttachmentRefs(withPoster, [{ id: 'video-1', noteId: 'note-1', data: 'data:video/mp4;base64,aGVsbG8=', mimeType: 'video/mp4' }, { id: 'image-1', noteId: 'note-1', data: imageData, mimeType: 'image/png' }]);
+assert.match(restoredPoster, /poster="data:image\/png/);
+assert.match(restoredPoster, /data-attachment-id="video-1"/, 'poster hydration cannot replace the video attachment identity');
+
 console.log('attachment content tests passed');

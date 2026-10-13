@@ -1,264 +1,79 @@
-
 const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
 const { mkdtempSync, writeFileSync } = require('node:fs');
 const { join } = require('node:path');
 const { tmpdir } = require('node:os');
 
-const tempDir = mkdtempSync(join(tmpdir(), 'marknote-supabase-apply-'));
-const syncConfigPreloadPath = join(process.cwd(), 'tests/sync-config-preload.cjs');
-const syncConfigEnv = {
-  MARKNOTE_SYNC_CONFIG_URL: 'https://config.example.test/marknote/sync-config',
-  MARKNOTE_TEST_SYNC_CONFIG_JSON: JSON.stringify({
-    provider: 'supabase',
-    supabase: {
-      url: 'https://projectref.supabase.co',
-      publishableKey: 'sb_publishable_test',
-    },
-  }),
+const tempDir = mkdtempSync(join(tmpdir(),'marknote-sync-apply-'));
+const preloadPath = join(tempDir,'management-preload.cjs');
+const gates = ['tables','authenticated grants','rls','legacy writes disabled','internal tables private','versioned RPC security',
+  'public policies','attachments bucket','storage rls','storage grants','storage policies'];
+writeFileSync(preloadPath,`
+const assert=require('node:assert/strict');
+let applied=false;
+globalThis.fetch=async(input,init={})=>{
+  const url=String(input);
+  assert.equal(init.headers.authorization,'Bearer dummy-management-token');
+  assert.ok(init.signal instanceof AbortSignal,'management requests must have a timeout');
+  if(url.endsWith('/database/migrations') && init.method==='GET') return response(200,[{version:'202610130001',name:'marknote_sync_v2'}]);
+  if(url.endsWith('/database/migrations') && init.method==='POST') {
+    const body=JSON.parse(init.body);
+    assert.equal(body.name,'marknote_sync_v2');
+    assert.match(body.query,/^begin;/);
+    assert.match(body.query,/commit;$/);
+    assert.match(body.query,/create table if not exists public.notes/);
+    assert.match(body.query,/marknote_sync_push_v2/);
+    assert.match(body.query,/revoke insert, update, delete on public.folders/);
+    assert.doesNotMatch(body.query,/dummy-management-token/);
+    if(process.env.MARKNOTE_TEST_APPLY_MODE==='post-failure') return response(403,{message:'Forbidden'});
+    applied=true; process.stdout.write('[apply-ok]'); return response(201,{id:'test-migration'});
+  }
+  if(url.endsWith('/database/query/read-only')) {
+    const body=JSON.parse(init.body);
+    assert.equal(body.read_only,true);
+    assert.match(body.query,/unsafe_legacy_writes/);
+    assert.match(body.query,/has_function_privilege/);
+    if(process.env.MARKNOTE_TEST_APPLY_MODE==='invalid-result') return response(200,[]);
+    const ready=process.env.MARKNOTE_TEST_APPLY_MODE==='ready' || applied;
+    return response(200,${JSON.stringify(gates)}.map(check_name=>({check_name,ok:ready,detail:ready?'ok':'missing prerequisite'})));
+  }
+  throw new Error('Unexpected URL '+url);
 };
-const expectedTables = ['profiles', 'devices', 'folders', 'notes', 'attachments'];
-const expectedTableRows = expectedTables.map((table_name) => ({ table_name }));
-const expectedGrantRows = expectedTables.flatMap((table_name) =>
-  ['SELECT', 'INSERT', 'UPDATE', 'DELETE'].map((privilege_type) => ({ table_name, privilege_type })),
-);
-const expectedRlsRows = expectedTables.map((table_name) => ({ table_name, rls_enabled: true }));
-const expectedPublicPolicyRows = [
-  ['profiles', 'Users can read own profile'],
-  ['profiles', 'Users can insert own profile'],
-  ['profiles', 'Users can update own profile'],
-  ['devices', 'Users can read own devices'],
-  ['devices', 'Users can insert own devices'],
-  ['devices', 'Users can update own devices'],
-  ['devices', 'Users can delete own devices'],
-  ['folders', 'Users can read own folders'],
-  ['folders', 'Users can insert own folders'],
-  ['folders', 'Users can update own folders'],
-  ['folders', 'Users can delete own folders'],
-  ['notes', 'Users can read own notes'],
-  ['notes', 'Users can insert own notes'],
-  ['notes', 'Users can update own notes'],
-  ['notes', 'Users can delete own notes'],
-  ['attachments', 'Users can read own attachments'],
-  ['attachments', 'Users can insert own attachments'],
-  ['attachments', 'Users can update own attachments'],
-  ['attachments', 'Users can delete own attachments'],
-].map(([table_name, policy_name]) => ({ table_name, policy_name }));
-const expectedStoragePolicyRows = [
-  'Users can read own attachment objects',
-  'Users can upload own attachment objects',
-  'Users can update own attachment objects',
-  'Users can delete own attachment objects',
-].map((policy_name) => ({ policy_name }));
-
-const readyPreloadPath = join(tempDir, 'ready-preload.cjs');
-writeFileSync(
-  readyPreloadPath,
-  `
-globalThis.fetch = async (input, init = {}) => {
-  const url = String(input);
-  assertAuth(init);
-  if (url.endsWith('/database/migrations')) {
-    return jsonResponse(200, [{ version: '202606190001', name: 'marknote_sync_schema' }]);
-  }
-  if (url.endsWith('/database/query/read-only')) {
-    const body = JSON.parse(init.body || '{}');
-    if (body.query.includes('information_schema.tables')) {
-      return jsonResponse(200, ${JSON.stringify(expectedTableRows)});
-    }
-    if (body.query.includes('information_schema.role_table_grants')) {
-      return jsonResponse(200, ${JSON.stringify(expectedGrantRows)});
-    }
-    if (body.query.includes('pg_class')) {
-      return jsonResponse(200, ${JSON.stringify(expectedRlsRows)});
-    }
-    if (body.query.includes("schemaname = 'public'")) {
-      return jsonResponse(200, ${JSON.stringify(expectedPublicPolicyRows)});
-    }
-    if (body.query.includes('storage.buckets')) {
-      return jsonResponse(200, [{ attachments_bucket_ready: true }]);
-    }
-    if (body.query.includes("schemaname = 'storage'")) {
-      return jsonResponse(200, ${JSON.stringify(expectedStoragePolicyRows)});
-    }
-  }
-  return jsonResponse(500, { message: 'Unexpected URL: ' + url });
-};
-function assertAuth(init) {
-  if (init.headers.authorization !== 'Bearer management-token') throw new Error('missing management token');
-}
-function jsonResponse(status, body) {
-  return { status, async text() { return JSON.stringify(body); } };
-}
-`,
-);
-
-const readyResult = runScript(['--require', readyPreloadPath, 'scripts/apply-supabase-migration.mjs']);
-assert.equal(readyResult.status, 0, `${readyResult.stdout}\n${readyResult.stderr}`);
-assert.match(readyResult.stdout, /Migration history: found 202606190001/);
-assert.match(readyResult.stdout, /Sync schema already appears ready/);
-assert.match(readyResult.stdout, /verify:release:online:manual/);
-
-const applyPreloadPath = join(tempDir, 'apply-preload.cjs');
-writeFileSync(
-  applyPreloadPath,
-  `
-let applied = false;
-globalThis.fetch = async (input, init = {}) => {
-  const url = String(input);
-  assertAuth(init);
-  if (url.endsWith('/database/migrations') && init.method === 'GET') {
-    return jsonResponse(200, []);
-  }
-  if (url.endsWith('/database/migrations') && init.method === 'POST') {
-    const body = JSON.parse(init.body || '{}');
-    if (body.name !== 'marknote_sync_schema') throw new Error('wrong migration name');
-    if (!body.query.includes('create table if not exists public.notes')) throw new Error('missing migration SQL');
-    applied = true;
-    return jsonResponse(201, { id: 'migration-id' });
-  }
-  if (url.endsWith('/database/query/read-only')) {
-    const body = JSON.parse(init.body || '{}');
-    if (!applied) {
-      if (body.query.includes('information_schema.tables')) return jsonResponse(200, []);
-      if (body.query.includes('information_schema.role_table_grants')) return jsonResponse(200, []);
-      if (body.query.includes('pg_class')) return jsonResponse(200, []);
-      if (body.query.includes("schemaname = 'public'")) return jsonResponse(200, []);
-      if (body.query.includes('storage.buckets')) return jsonResponse(200, [{ attachments_bucket_ready: false }]);
-      if (body.query.includes("schemaname = 'storage'")) return jsonResponse(200, []);
-    }
-    if (body.query.includes('information_schema.tables')) {
-      return jsonResponse(200, ${JSON.stringify(expectedTableRows)});
-    }
-    if (body.query.includes('information_schema.role_table_grants')) {
-      return jsonResponse(200, ${JSON.stringify(expectedGrantRows)});
-    }
-    if (body.query.includes('pg_class')) {
-      return jsonResponse(200, ${JSON.stringify(expectedRlsRows)});
-    }
-    if (body.query.includes("schemaname = 'public'")) {
-      return jsonResponse(200, ${JSON.stringify(expectedPublicPolicyRows)});
-    }
-    if (body.query.includes('storage.buckets')) {
-      return jsonResponse(200, [{ attachments_bucket_ready: true }]);
-    }
-    if (body.query.includes("schemaname = 'storage'")) {
-      return jsonResponse(200, ${JSON.stringify(expectedStoragePolicyRows)});
-    }
-  }
-  return jsonResponse(500, { message: 'Unexpected URL: ' + url });
-};
-function assertAuth(init) {
-  if (init.headers.authorization !== 'Bearer management-token') throw new Error('missing management token');
-}
-function jsonResponse(status, body) {
-  return { status, async text() { return JSON.stringify(body); } };
-}
-`,
-);
-
-const applyResult = runScript(['--require', applyPreloadPath, 'scripts/apply-supabase-migration.mjs', '--apply']);
-assert.equal(applyResult.status, 0, `${applyResult.stdout}\n${applyResult.stderr}`);
-assert.match(applyResult.stdout, /Migration history: MarkNote sync migration has not been recorded/);
-assert.match(applyResult.stdout, /Applying marknote_sync_schema/);
-assert.match(applyResult.stdout, /Supabase sync schema: ready/);
-assert.match(applyResult.stdout, /verify:release:online:manual/);
-
-const dryRunResult = runScript(['--require', applyPreloadPath, 'scripts/apply-supabase-migration.mjs']);
-assert.notEqual(dryRunResult.status, 0, `${dryRunResult.stdout}\n${dryRunResult.stderr}`);
-assert.match(dryRunResult.stderr, /Supabase sync schema is not ready/);
-assert.match(dryRunResult.stderr, /Dry run only/);
-assert.match(dryRunResult.stderr, /npm run apply:supabase-migration/);
-assert.doesNotMatch(dryRunResult.stdout, /Supabase sync schema: ready/);
-
-const missingPolicyPreloadPath = join(tempDir, 'missing-policy-preload.cjs');
-writeFileSync(
-  missingPolicyPreloadPath,
-  `
-globalThis.fetch = async (input, init = {}) => {
-  const url = String(input);
-  assertAuth(init);
-  if (url.endsWith('/database/migrations')) {
-    return jsonResponse(200, [{ version: '202606190001', name: 'marknote_sync_schema' }]);
-  }
-  if (url.endsWith('/database/query/read-only')) {
-    const body = JSON.parse(init.body || '{}');
-    if (body.query.includes('information_schema.tables')) {
-      return jsonResponse(200, ${JSON.stringify(expectedTableRows)});
-    }
-    if (body.query.includes('information_schema.role_table_grants')) {
-      return jsonResponse(200, ${JSON.stringify(expectedGrantRows)});
-    }
-    if (body.query.includes('pg_class')) {
-      return jsonResponse(200, ${JSON.stringify(expectedRlsRows)});
-    }
-    if (body.query.includes("schemaname = 'public'")) {
-      return jsonResponse(200, ${JSON.stringify(expectedPublicPolicyRows.filter((row) => row.policy_name !== 'Users can update own notes'))});
-    }
-    if (body.query.includes('storage.buckets')) {
-      return jsonResponse(200, [{ attachments_bucket_ready: true }]);
-    }
-    if (body.query.includes("schemaname = 'storage'")) {
-      return jsonResponse(200, ${JSON.stringify(expectedStoragePolicyRows.filter((row) => row.policy_name !== 'Users can delete own attachment objects'))});
-    }
-  }
-  return jsonResponse(500, { message: 'Unexpected URL: ' + url });
-};
-function assertAuth(init) {
-  if (init.headers.authorization !== 'Bearer management-token') throw new Error('missing management token');
-}
-function jsonResponse(status, body) {
-  return { status, async text() { return JSON.stringify(body); } };
-}
-`,
-);
-
-const missingPolicyResult = runScript(['--require', missingPolicyPreloadPath, 'scripts/apply-supabase-migration.mjs']);
-assert.notEqual(missingPolicyResult.status, 0, `${missingPolicyResult.stdout}\n${missingPolicyResult.stderr}`);
-assert.match(missingPolicyResult.stdout, /Public policies: missing notes:Users can update own notes/);
-assert.match(missingPolicyResult.stdout, /Storage policies: missing Users can delete own attachment objects/);
-assert.match(missingPolicyResult.stderr, /Supabase sync schema is not ready/);
-
-const missingTokenResult = spawnSync(process.execPath, ['--require', syncConfigPreloadPath, 'scripts/apply-supabase-migration.mjs'], {
-  cwd: process.cwd(),
-  encoding: 'utf8',
-  env: {
-    ...syncConfigEnv,
-    MARKNOTE_SUPABASE_URL: '',
-    MARKNOTE_SUPABASE_PUBLISHABLE_KEY: '',
-    VITE_SUPABASE_URL: '',
-    VITE_SUPABASE_PUBLISHABLE_KEY: '',
-    SUPABASE_MANAGEMENT_TOKEN: '',
-    SUPABASE_API_ACCESS_TOKEN: '',
-    SUPABASE_PAT: '',
-  },
-});
-assert.notEqual(missingTokenResult.status, 0);
-assert.match(missingTokenResult.stderr, /SUPABASE_MANAGEMENT_TOKEN is missing/);
-
-console.log('supabase migration apply tests passed');
-
-function runScript(args) {
-  const scriptIndex = args.findIndex((arg) => arg.endsWith('.mjs'));
-  return spawnSync(process.execPath, [
-    ...args.slice(0, scriptIndex),
-    '--require',
-    syncConfigPreloadPath,
-    ...args.slice(scriptIndex),
-  ], {
-    cwd: process.cwd(),
-    encoding: 'utf8',
-    env: {
-      ...process.env,
-      ...syncConfigEnv,
-      MARKNOTE_SUPABASE_URL: '',
-      MARKNOTE_SUPABASE_PUBLISHABLE_KEY: '',
-      VITE_SUPABASE_URL: '',
-      VITE_SUPABASE_PUBLISHABLE_KEY: '',
-      SUPABASE_PROJECT_REF: '',
-      SUPABASE_MANAGEMENT_TOKEN: 'management-token',
-      SUPABASE_API_ACCESS_TOKEN: '',
-      SUPABASE_PAT: '',
-    },
+function response(status,body){return{status,async text(){return JSON.stringify(body)}};}
+`);
+function run(args=[],mode='ready',extra={}) {
+  return spawnSync(process.execPath,['--require',preloadPath,'scripts/apply-supabase-migration.mjs',...args],{
+    cwd:process.cwd(),encoding:'utf8',env:{...process.env,SUPABASE_PROJECT_REF:'test-project',SUPABASE_MANAGEMENT_TOKEN:'dummy-management-token',
+      SUPABASE_API_ACCESS_TOKEN:'',SUPABASE_PAT:'',SUPABASE_MANAGEMENT_API_URL:'https://management.test',MARKNOTE_TEST_APPLY_MODE:mode,...extra},
   });
 }
+const ready=run();
+assert.equal(ready.status,0,ready.stderr);
+assert.match(ready.stdout,/Migration history: found 202610130001/);
+assert.match(ready.stdout,/Sync schema already appears ready/);
+assert.match(ready.stdout,/verify:release:online:manual/);
+assert.doesNotMatch(ready.stdout,/dummy-management-token/);
+const missing=run([],'missing');
+assert.equal(missing.status,1);
+assert.match(missing.stderr,/Dry run only: no migration was applied/);
+assert.doesNotMatch(missing.stdout,/\[apply-ok\]/);
+const applied=run(['--apply'],'missing');
+assert.equal(applied.status,0,applied.stderr);
+assert.match(applied.stdout,/\[apply-ok\]/);
+assert.match(applied.stdout,/Supabase sync schema: ready/);
+const forced=run(['--apply','--force']);
+assert.equal(forced.status,0,forced.stderr);
+assert.match(forced.stdout,/\[apply-ok\]/);
+const forceDry=run(['--force']);
+assert.equal(forceDry.status,1);
+assert.doesNotMatch(forceDry.stdout,/\[apply-ok\]/);
+const failed=run(['--apply'],'post-failure');
+assert.equal(failed.status,1);
+assert.match(failed.stderr,/HTTP 403/);
+const malformed=run(['--apply'],'invalid-result');
+assert.equal(malformed.status,1);
+assert.match(malformed.stderr,/schema readiness check is still incomplete/);
+const noToken=run([], 'ready',{SUPABASE_MANAGEMENT_TOKEN:''});
+assert.equal(noToken.status,1);
+assert.match(noToken.stderr,/SUPABASE_MANAGEMENT_TOKEN is missing/);
+console.log('Supabase migration apply tests passed (v2 gates, dry run, atomic apply, blocked credentials).');

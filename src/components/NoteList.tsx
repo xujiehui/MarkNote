@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { FixedSizeList as VirtualList } from 'react-window';
 import { Check, ListFilter, MoreHorizontal, Pin, Plus, RotateCcw, SlidersHorizontal, Trash2 } from 'lucide-react';
 import type { Folder as NoteFolder, Note, NoteQuickFilter, NoteSortMode } from '../types';
@@ -14,6 +14,7 @@ interface NoteListProps {
   isTrash: boolean;
   sortMode: NoteSortMode;
   quickFilter: NoteQuickFilter;
+  searchPending?: boolean;
   onSortModeChange: (mode: NoteSortMode) => void;
   onQuickFilterChange: (filter: NoteQuickFilter) => void;
   onCreateNote: () => void;
@@ -30,6 +31,7 @@ export function NoteList({
   isTrash,
   sortMode,
   quickFilter,
+  searchPending = false,
   onSortModeChange,
   onQuickFilterChange,
   onCreateNote,
@@ -41,14 +43,38 @@ export function NoteList({
   const { locale, t } = useI18n();
   const [sortOpen, setSortOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const [viewport, setViewport] = useState({ width: 0, height: 0 });
+  useLayoutEffect(() => {
+    const element = viewportRef.current;
+    if (!element) return;
+    const measure = () => {
+      const rect = element.getBoundingClientRect();
+      const width = Math.max(0, Math.floor(rect.width));
+      const height = Math.max(0, Math.floor(rect.height));
+      setViewport((current) => current.width === width && current.height === height ? current : { width, height });
+    };
+    measure();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(element);
+    window.addEventListener('resize', measure);
+    return () => { observer?.disconnect(); window.removeEventListener('resize', measure); };
+  }, []);
+  useEffect(() => {
+    const close = () => { setSortOpen(false); setFilterOpen(false); };
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') close(); };
+    window.addEventListener('click', close);
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('click', close); window.removeEventListener('keydown', onKey); };
+  }, []);
   const sortOptions: Array<{ mode: NoteSortMode; label: string }> = [
     { mode: 'updated', label: t('note.sortUpdated') },
     { mode: 'created', label: t('note.sortCreated') },
     { mode: 'title', label: t('note.sortTitle') },
-    { mode: 'favorite', label: '收藏数' },
+    { mode: 'favorite', label: t('note.sortFavorite') },
   ];
   const filterOptions: Array<{ mode: NoteQuickFilter; label: string }> = [
-    { mode: 'all', label: '全部' },
+    { mode: 'all', label: t('filter.allNotes') },
     { mode: 'pinned', label: t('note.filterPinned') },
     { mode: 'archived', label: t('note.filterArchived') },
     { mode: 'recent7', label: t('note.filterRecent7') },
@@ -56,12 +82,12 @@ export function NoteList({
   ];
 
   return (
-    <section className="grid h-full w-[360px] shrink-0 grid-rows-[auto_1fr] border-r border-[#e5e7eb] bg-white">
+    <section className="note-list grid h-full min-h-0 min-w-0 w-[360px] shrink-0 grid-rows-[auto_minmax(0,1fr)] border-r border-[#e5e7eb] bg-white" aria-label={title}>
       <header className="px-5 pb-4 pt-8">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <h2 className="truncate text-[18px] font-semibold leading-tight text-[#111827]">{title}</h2>
-            <p className="mt-1 text-[14px] text-[#6b7280]">{t('note.records', { count: notes.length })}</p>
+            <p className="mt-1 text-[14px] text-[#6b7280]" role="status">{searchPending ? t('note.searching') : t('note.records', { count: notes.length })}</p>
           </div>
           <div className="flex items-center gap-2">
             <div className="relative">
@@ -133,27 +159,35 @@ export function NoteList({
         </div>
       </header>
 
+      <div ref={viewportRef} className="min-h-0 min-w-0" data-testid="note-list-viewport">
       {notes.length === 0 ? (
-        <div className="grid place-items-center px-6 text-center text-sm text-[#6b7280]">
+        <div className="grid h-full place-items-center px-6 text-center text-sm text-[#6b7280]" role="status">
           {isTrash ? t('note.trashEmpty') : t('note.noMatches')}
         </div>
-      ) : (
-        <VirtualList height={Math.max(320, window.innerHeight - 90)} itemCount={notes.length} itemSize={144} width={360}>
+      ) : viewport.width > 0 && viewport.height > 0 ? (
+        <VirtualList height={viewport.height} itemCount={notes.length} itemSize={144} width={viewport.width} itemKey={(index) => notes[index].id}>
           {({ index, style }) => {
             const note = notes[index];
             const active = note.id === activeNoteId;
             return (
               <div style={style}>
                 <article
-                  onClick={() => onSelectNote(note.id)}
                   onContextMenu={(event) => onContextMenu(event, note)}
-                  className={`note-card mx-5 mt-2 h-[128px] cursor-default rounded-lg border p-4 transition ${
+                  className={`note-card relative mx-5 mt-2 h-[128px] cursor-default rounded-lg border p-4 transition ${
                     active
                       ? 'is-active border-[#d7e7ff] border-l-[#2f7df6] border-l-4 bg-[#f3f8ff] shadow-[0_12px_26px_rgba(15,23,42,0.05)]'
                       : 'border-[#e5e7eb] bg-white hover:-translate-y-0.5 hover:border-[#d4d8df] hover:shadow-[0_12px_26px_rgba(15,23,42,0.05)]'
                   }`}
                 >
-                  <div className="mb-2 flex items-start justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={() => onSelectNote(note.id)}
+                    className="absolute inset-0 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-[#2f7df6] focus-visible:ring-offset-2"
+                    aria-label={note.title || t('note.untitled')}
+                    aria-current={active ? 'true' : undefined}
+                    data-note-select={note.id}
+                  />
+                  <div className="pointer-events-none relative mb-2 flex items-start justify-between gap-3">
                     <h3 className="line-clamp-1 text-[16px] font-semibold leading-6 text-[#111827]">{note.title || t('note.untitled')}</h3>
                     <span className="flex shrink-0 items-center gap-4 text-[#4b5563]">
                       {note.pinned ? <Pin size={15} className="fill-[#2f7df6] text-[#2f7df6]" /> : null}
@@ -163,18 +197,18 @@ export function NoteList({
                           event.stopPropagation();
                           onContextMenu(event, note);
                         }}
-                        className="grid h-6 w-6 place-items-center rounded-md hover:bg-[#eef2f7]"
-                        aria-label="笔记操作"
-                        title="笔记操作"
+                        className="pointer-events-auto relative grid h-6 w-6 place-items-center rounded-md hover:bg-[#eef2f7]"
+                        aria-label={t('note.actions')}
+                        title={t('note.actions')}
                       >
                         <MoreHorizontal size={17} />
                       </button>
                     </span>
                   </div>
-                  <p className="line-clamp-2 min-h-[38px] text-[14px] leading-[1.5] text-[#4b5563]">
+                  <p className="pointer-events-none relative line-clamp-2 min-h-[38px] text-[14px] leading-[1.5] text-[#4b5563]">
                     {notePreview(note, t('note.emptyPreview'))}
                       </p>
-                      <div className="mt-3 flex items-center justify-between gap-3">
+                      <div className="pointer-events-none relative mt-3 flex items-center justify-between gap-3">
                     <time className="text-[14px] text-[#4b5563]">{formatUpdatedAt(note.updatedAt, locale)}</time>
                     {isTrash ? (
                       <span className="flex gap-1">
@@ -186,7 +220,7 @@ export function NoteList({
                             event.stopPropagation();
                             onRestoreNote(note.id);
                           }}
-                          className="grid h-6 w-6 place-items-center rounded border border-[#e5e7eb] bg-white text-[#4b5563] hover:bg-[#f3f4f6]"
+                          className="pointer-events-auto relative grid h-6 w-6 place-items-center rounded border border-[#e5e7eb] bg-white text-[#4b5563] hover:bg-[#f3f4f6]"
                         >
                           <RotateCcw size={13} />
                         </button>
@@ -198,7 +232,7 @@ export function NoteList({
                             event.stopPropagation();
                             onDeleteForever(note.id);
                           }}
-                          className="grid h-6 w-6 place-items-center rounded border border-[#e5e7eb] bg-white text-[#ef4444] hover:bg-[#f3f4f6]"
+                          className="pointer-events-auto relative grid h-6 w-6 place-items-center rounded border border-[#e5e7eb] bg-white text-[#ef4444] hover:bg-[#f3f4f6]"
                         >
                           <Trash2 size={13} />
                         </button>
@@ -218,7 +252,8 @@ export function NoteList({
             );
           }}
         </VirtualList>
-      )}
+      ) : null}
+      </div>
     </section>
   );
 }
@@ -276,7 +311,8 @@ function MenuOption({ active, label, onClick }: { active: boolean; label: string
 }
 
 function notePreview(note: Note, emptyPreview: string) {
-  return getPreview(note.content, 54, emptyPreview);
+  if (note.rawContent) return note.rawContent.replace(/\s+/g, ' ').trim().slice(0, 54) || emptyPreview;
+  return note.rawContent ? `${note.rawContent.slice(0, 54)}${note.rawContent.length > 54 ? '…' : ''}` : getPreview(note.content, 54, emptyPreview);
 }
 
 function noteTags(note: Note) {

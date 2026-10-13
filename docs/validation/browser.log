@@ -1,0 +1,29 @@
+[WebServer] (node:24494) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:24507) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 13 tests using 1 worker
+
+(node:24531) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   1 e2e/ui.spec.ts:10:3 › the editor fits the 768px layout without horizontal overflow (1.3s)
+  ✓   2 e2e/ui.spec.ts:10:3 › the editor fits the 1024px layout without horizontal overflow (1.2s)
+  ✓   3 e2e/ui.spec.ts:10:3 › the editor fits the 1440px layout without horizontal overflow (1.3s)
+  ✓   4 e2e/ui.spec.ts:26:1 › a 200 percent desktop zoom equivalent keeps controls inside the CSS viewport (1.2s)
+  ✓   5 e2e/ui.spec.ts:47:1 › a real safe link keeps its URL and text after saving and reopening (2.4s)
+  ✓   6 e2e/workspace.spec.ts:10:1 › typing immediately before new-note navigation persists both title and body (2.0s)
+  ✓   7 e2e/workspace.spec.ts:25:1 › editor creates real tables and unavailable product capabilities stay hidden (2.8s)
+  ✓   8 e2e/workspace.spec.ts:43:1 › production PWA reloads and reopens offline without the HTTP cache (1.9s)
+  ✓   9 e2e/workspace.spec.ts:63:1 › phone layout keeps the editor usable and supports returning to the list (1.3s)
+  ✓  10 e2e/workspace.spec.ts:77:1 › a durable unfinished draft survives reloading as a visible recovery copy (2.1s)
+  ✓  11 e2e/workspace.spec.ts:173:1 › storage write failures keep the editor open and export the unfinished text (1.3s)
+  ✓  12 e2e/workspace.spec.ts:196:1 › pinning during typing flushes edits without creating a false conflict (1.7s)
+  ✓  13 e2e/workspace.spec.ts:207:1 › worker search refresh preserves the selected editor node and typing focus (2.9s)
+
+  13 passed (25.5s)
+npm notice
+npm notice New major version of npm available! 11.9.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice

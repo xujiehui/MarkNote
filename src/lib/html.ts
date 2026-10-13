@@ -1,4 +1,5 @@
 import hljs from 'highlight.js/lib/common';
+import { sanitizeNoteContent } from './sanitizeContent';
 
 export function stripHtml(html: string): string {
   if (!html) {
@@ -28,6 +29,7 @@ export function noteHtmlDocument(title: string, content: string): string {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: blob: https: http:; media-src data: blob: https: http:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
   <title>${escapeHtml(title)}</title>
   <style>
     :root { color: #24221f; background: #fbfaf7; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
@@ -73,7 +75,7 @@ export function escapeHtml(value: string): string {
 }
 
 function prepareExportContent(content: string): string {
-  const doc = new DOMParser().parseFromString(content, 'text/html');
+  const doc = new DOMParser().parseFromString(sanitizeNoteContent(content), 'text/html');
   doc.querySelectorAll('pre code').forEach((code) => {
     const element = code as HTMLElement;
     const className = element.getAttribute('class') || '';

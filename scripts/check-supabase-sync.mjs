@@ -316,134 +316,15 @@ function authenticatedTableFailureMessage(results) {
 }
 
 async function checkSyncTableWrites(bearerToken, userId) {
-  if (!userId) {
-    throw new CheckFailedError('SUPABASE_ACCESS_TOKEN is not a valid JWT with a sub claim. Sign in again and retry the backend check.');
+  if (!userId) throw new CheckFailedError('SUPABASE_ACCESS_TOKEN is not a valid JWT with a sub claim. Sign in again and retry the backend check.');
+  const response = await tableRequest('rpc/marknote_sync_check_v2', bearerToken, { method: 'POST', body: {} });
+  if (!response.ok) throw new CheckFailedError(`Versioned sync protocol check failed: HTTP ${response.status}. Apply 202610130001_marknote_sync_v2.sql; legacy direct writes must remain disabled. ${response.body?.message || ''}`);
+  const required = ['cas','idempotency','sequence','tombstones','snapshot-paging'];
+  if (response.body?.protocolVersion !== 2 || !Array.isArray(response.body.capabilities)
+    || required.some(capability => !response.body.capabilities.includes(capability))) {
+    throw new CheckFailedError('Versioned sync protocol check returned an unsupported protocol.');
   }
-  const now = new Date().toISOString();
-  const suffix = `${Date.now()}`;
-  const folderId = `marknote-diagnostic-folder-${suffix}`;
-  const noteId = `marknote-diagnostic-note-${suffix}`;
-  const attachmentId = `marknote-diagnostic-attachment-${suffix}`;
-  const storagePath = `${userId}/.marknote-diagnostics/${attachmentId}.txt`;
-  const cleanup = async () => {
-    const attachmentDelete = await deleteRows('attachments', bearerToken, userId, attachmentId);
-    const noteDelete = await deleteRows('notes', bearerToken, userId, noteId);
-    const folderDelete = await deleteRows('folders', bearerToken, userId, folderId);
-    return [
-      { label: 'Sync table attachment delete', response: attachmentDelete },
-      { label: 'Sync table note delete', response: noteDelete },
-      { label: 'Sync table folder delete', response: folderDelete },
-    ];
-  };
-
-  try {
-    const folderInsert = await tableRequest('folders', bearerToken, {
-      method: 'POST',
-      body: {
-        id: folderId,
-        user_id: userId,
-        name: 'MarkNote diagnostic folder',
-        sort_order: 0,
-        created_at: now,
-        updated_at: now,
-        version: 1,
-      },
-    });
-    if (!folderInsert.ok) {
-      throw tableWriteError('Sync table folder insert', folderInsert);
-    }
-
-    const noteInsert = await tableRequest('notes', bearerToken, {
-      method: 'POST',
-      body: {
-        id: noteId,
-        user_id: userId,
-        folder_id: folderId,
-        title: 'MarkNote diagnostic note',
-        content: '<p>diagnostic</p>',
-        raw_content: 'diagnostic',
-        tags: [],
-        pinned: false,
-        created_at: now,
-        updated_at: now,
-        version: 1,
-      },
-    });
-    if (!noteInsert.ok) {
-      throw tableWriteError('Sync table note insert', noteInsert);
-    }
-
-    const attachmentInsert = await tableRequest('attachments', bearerToken, {
-      method: 'POST',
-      body: {
-        id: attachmentId,
-        user_id: userId,
-        note_id: noteId,
-        storage_path: storagePath,
-        mime_type: 'text/plain',
-        size_bytes: 0,
-        created_at: now,
-        updated_at: now,
-      },
-    });
-    if (!attachmentInsert.ok) {
-      throw tableWriteError('Sync table attachment insert', attachmentInsert);
-    }
-
-    const noteUpdate = await tableRequest('notes', bearerToken, {
-      method: 'PATCH',
-      query: { user_id: `eq.${userId}`, id: `eq.${noteId}` },
-      body: {
-        title: 'MarkNote diagnostic note updated',
-        updated_at: new Date().toISOString(),
-      },
-    });
-    if (!noteUpdate.ok) {
-      throw tableWriteError('Sync table note update', noteUpdate);
-    }
-
-    const cleanupResults = await cleanup();
-    const cleanupFailure = cleanupResults.find((result) => !result.response.ok);
-    if (cleanupFailure) {
-      throw tableWriteError(cleanupFailure.label, cleanupFailure.response);
-    }
-    const leftover = await findDiagnosticRowLeftover(bearerToken, userId, [
-      { table: 'attachments', id: attachmentId, label: 'Sync table attachment delete' },
-      { table: 'notes', id: noteId, label: 'Sync table note delete' },
-      { table: 'folders', id: folderId, label: 'Sync table folder delete' },
-    ]);
-    if (leftover) {
-      throw new CheckFailedError(`${leftover.label} returned success, but the diagnostic row is still visible.`);
-    }
-    console.log('Sync table writes: ok (insert, update, delete)');
-  } finally {
-    await cleanup().catch(() => undefined);
-  }
-}
-
-async function deleteRows(table, bearerToken, userId, id) {
-  return tableRequest(table, bearerToken, {
-    method: 'DELETE',
-    query: { user_id: `eq.${userId}`, id: `eq.${id}` },
-  });
-}
-
-async function findDiagnosticRowLeftover(bearerToken, userId, rows) {
-  for (const row of rows) {
-    const result = await tableRequest(row.table, bearerToken, {
-      method: 'GET',
-      query: {
-        select: 'id',
-        user_id: `eq.${userId}`,
-        id: `eq.${row.id}`,
-        limit: '1',
-      },
-    });
-    if (!result.ok || (Array.isArray(result.body) && result.body.length > 0)) {
-      return row;
-    }
-  }
-  return null;
+  console.log('Sync table writes: ok (versioned RPC CAS, replay, tombstones; diagnostic transaction rolled back)');
 }
 
 async function tableRequest(table, bearerToken, { method, body, query = {} }) {
@@ -456,6 +337,7 @@ async function tableRequest(table, bearerToken, { method, body, query = {} }) {
   try {
     response = await fetch(url, {
       method,
+      signal: AbortSignal.timeout(30_000),
       headers: {
         apikey: publishableKey,
         authorization: `Bearer ${bearerToken}`,
@@ -476,19 +358,6 @@ async function tableRequest(table, bearerToken, { method, body, query = {} }) {
     status: response.status,
     body: parseBody(text),
   };
-}
-
-function tableWriteError(label, response) {
-  return new CheckFailedError(
-    [
-      `${label} check failed: HTTP ${response.status}`,
-      response.body.code ? `Code: ${response.body.code}` : '',
-      response.body.message ? `Message: ${response.body.message}` : '',
-      'Confirm the authenticated Data API grants, RLS policies, and folder/note/attachment foreign keys from the sync migration are applied.',
-    ]
-      .filter(Boolean)
-      .join('\n'),
-  );
 }
 
 async function checkStorage(bearerToken, userId) {
@@ -637,6 +506,7 @@ async function storageRequest({ method, path, bearerToken, body, contentType = '
   try {
     response = await fetch(url, {
       method,
+      signal: AbortSignal.timeout(30_000),
       headers: {
         apikey: publishableKey,
         authorization: `Bearer ${bearerToken}`,

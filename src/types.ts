@@ -12,6 +12,8 @@ export interface Note {
   syncStatus?: SyncStatus;
   lastSyncedAt?: number | null;
   version?: number;
+  /** Last server-confirmed revision, used as the base for conditional writes. */
+  remoteRevision?: number;
 }
 
 export interface Folder {
@@ -24,6 +26,7 @@ export interface Folder {
   syncStatus?: SyncStatus;
   lastSyncedAt?: number | null;
   version?: number;
+  remoteRevision?: number;
 }
 
 export interface ImageAttachment {
@@ -38,6 +41,12 @@ export interface ImageAttachment {
   deletedAt?: number | null;
   syncStatus?: SyncStatus;
   lastSyncedAt?: number | null;
+  version?: number;
+  remoteRevision?: number;
+  /** Local-only bytes retained while a saved note version still references this attachment. */
+  retainedForHistory?: boolean;
+  /** Local immutable snapshot bytes; uploaded only if a restored current note uses them. */
+  historyOnly?: boolean;
 }
 
 export type SyncEntity = 'folder' | 'note' | 'attachment';
@@ -55,6 +64,42 @@ export interface SyncQueueItem {
   updatedAt: number;
   attempts: number;
   lastError?: string;
+  /** Changes on every local mutation, even when the queue slot is reused. */
+  mutationId?: string;
+  localRevision?: number;
+  baseRemoteRevision?: number;
+  snapshot?: Folder | Note | ImageAttachment;
+}
+
+export interface NoteDraftRecord {
+  noteId: string;
+  title: string;
+  content: string;
+  updatedAt: number;
+  revision: number;
+  baseVersion?: number;
+  recoveredNoteId?: string;
+}
+
+export interface NoteEditorDraftRecord extends NoteDraftRecord {
+  id: string;
+  editorId: string;
+}
+
+export interface NoteHistoryRecord {
+  id: string;
+  noteId: string;
+  title: string;
+  content: string;
+  createdAt: number;
+}
+
+export interface SyncTombstone {
+  id: string;
+  entity: SyncEntity;
+  entityId: string;
+  deletedAt: number;
+  remoteRevision?: number;
 }
 
 export interface SyncDevice {
@@ -75,6 +120,7 @@ export interface SyncState {
   lastSyncedAt: number;
   status: SyncStatus;
   lastError?: string;
+  lastPulledSeq?: number;
 }
 
 export type ExportFormat = 'html' | 'pdf' | 'markdown' | 'json';

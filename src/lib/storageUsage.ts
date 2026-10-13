@@ -3,6 +3,27 @@ import { dataUrlSizeBytes } from './image';
 
 export const DEFAULT_STORAGE_QUOTA_BYTES = 10 * 1024 * 1024;
 
+export interface BrowserStorageEstimate {
+  usedBytes: number | null;
+  quotaBytes: number | null;
+  persistent: boolean;
+}
+
+/** Browser quota includes all origin data; do not present a product quota as device capacity. */
+export async function estimateBrowserStorage(): Promise<BrowserStorageEstimate> {
+  if (typeof navigator === 'undefined' || !navigator.storage?.estimate) return { usedBytes: null, quotaBytes: null, persistent: false };
+  try {
+    const [estimate, persistent] = await Promise.all([navigator.storage.estimate(), navigator.storage.persisted?.() ?? false]);
+    return {
+      usedBytes: typeof estimate.usage === 'number' && Number.isFinite(estimate.usage) ? estimate.usage : null,
+      quotaBytes: typeof estimate.quota === 'number' && Number.isFinite(estimate.quota) && estimate.quota > 0 ? estimate.quota : null,
+      persistent,
+    };
+  } catch {
+    return { usedBytes: null, quotaBytes: null, persistent: false };
+  }
+}
+
 export function noteStorageBytes(notes: Note[]): number {
   return new Blob(notes.map((note) => `${note.title}${note.content}${note.tags.join('')}`)).size;
 }

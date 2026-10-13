@@ -4,6 +4,10 @@ import { createSyncEngine } from './engine';
 import { getRemoteSyncAdapter } from './adapters';
 import {
   AUTO_SYNC_DELAY_MS,
+  AUTO_SYNC_POLL_MS,
+  MAX_AUTO_SYNC_RETRIES,
+  autoSyncRetryDelay,
+  isRetryableSyncError,
   shouldAutoSync,
   shouldRetryAfterSuccessfulDiagnosis,
   shouldRunInitialBackendVerification,
@@ -22,8 +26,9 @@ import {
   writeStoredBackendCheck,
 } from './backendCheckStorage';
 import { errorWithCauseMessage } from './supabaseError';
-import { db } from '../lib/db';
-import type { AuthSession, OAuthProvider, SyncBackendCheckResult, SyncResult } from './types';
+import { db, switchWorkspaceAccount } from '../lib/db';
+import { getWorkspaceEpoch, getWorkspaceSnapshot, isWorkspaceCurrent, subscribeWorkspace } from '../workspace/state';
+import type { AuthSession, OAuthProvider, SyncBackendCheckResult, SyncResult, RemoteSyncAdapter } from './types';
 
 const handledDesktopCallbackUrls = new Set<string>();
 
@@ -51,8 +56,8 @@ export interface SyncSessionState {
   checkBackend: () => Promise<SyncBackendCheckResult>;
 }
 
-export function useSyncSession(): SyncSessionState {
-  const adapter = useMemo(() => getRemoteSyncAdapter(), []);
+export function useSyncSession(adapterOverride?: RemoteSyncAdapter): SyncSessionState {
+  const adapter = useMemo(() => adapterOverride ?? getRemoteSyncAdapter(), [adapterOverride]);
   const engine = useMemo(() => createSyncEngine(adapter), [adapter]);
   const legacyBackendCheckKey = backendCheckStorageKey(adapter.id);
   const [session, setSession] = useState<AuthSession | null>(null);
@@ -64,6 +69,17 @@ export function useSyncSession(): SyncSessionState {
   const [backendCheck, setBackendCheck] = useState<SyncBackendCheckResult | null>(null);
   const [error, setError] = useState('');
   const [queueError, setQueueError] = useState('');
+  const [workspaceVersion, setWorkspaceVersion] = useState(getWorkspaceSnapshot().epoch);
+  const [retryAttempt, setRetryAttempt] = useState(0);
+  const syncInFlight = useRef<Promise<SyncResult> | null>(null);
+  const backendInFlight = useRef<Promise<SyncBackendCheckResult> | null>(null);
+  const sessionChangeRequest = useRef(0);
+  const initialVerificationAttempted = useRef(new Set<string>());
+
+  useEffect(() => subscribeWorkspace(() => {
+    setWorkspaceVersion(getWorkspaceSnapshot().epoch);
+    setRetryAttempt(0);
+  }), []);
   const sessionChangeStateRef = useRef({
     session,
     authPending,
@@ -76,14 +92,18 @@ export function useSyncSession(): SyncSessionState {
   const queue = useLiveQuery(async () => {
     const items = await db.syncQueue.toArray();
     return summarizeSyncQueue(items);
-  }, [], { pending: 0, failed: 0, firstError: '' });
+  }, [workspaceVersion], { pending: 0, failed: 0, firstError: '' });
 
   const patchSessionStateRef = useCallback((patch: SyncSessionChangePatch) => {
     sessionChangeStateRef.current = patchSessionChangeState(sessionChangeStateRef.current, patch);
   }, []);
 
-  const runBackendCheck = useCallback(async () => {
+  const runBackendCheck = useCallback((): Promise<SyncBackendCheckResult> => {
+    if (backendInFlight.current) return backendInFlight.current;
+    const epoch = getWorkspaceEpoch();
+    const checkingUserId = sessionChangeStateRef.current.session?.user.id;
     setCheckingBackend(true);
+    const operation = (async () => {
     try {
       let result: SyncBackendCheckResult;
       try {
@@ -103,7 +123,8 @@ export function useSyncSession(): SyncSessionState {
       } catch (nextError: unknown) {
         result = backendCheckFailureResult(adapter.name, nextError);
       }
-      const userId = sessionChangeStateRef.current.session?.user.id;
+      if (!isWorkspaceCurrent(epoch) || checkingUserId !== sessionChangeStateRef.current.session?.user.id) return result;
+      const userId = checkingUserId;
       if (userId) {
         writeStoredBackendCheck(backendCheckStorageKeyForUser(adapter.id, userId), result);
       }
@@ -118,12 +139,27 @@ export function useSyncSession(): SyncSessionState {
       }
       return result;
     } finally {
-      setCheckingBackend(false);
+      if (isWorkspaceCurrent(epoch)) setCheckingBackend(false);
     }
+    })();
+    backendInFlight.current = operation;
+    void operation.finally(() => { if (backendInFlight.current === operation) backendInFlight.current = null; });
+    return operation;
   }, [adapter, patchSessionStateRef]);
 
   const applySessionChange = useCallback(
-    (nextSession: AuthSession | null) => {
+    async (nextSession: AuthSession | null) => {
+      const request = ++sessionChangeRequest.current;
+      setLoading(true);
+      await switchWorkspaceAccount(nextSession?.user.id ?? null, adapter.id);
+      if (request !== sessionChangeRequest.current) return sessionChangeStateRef.current;
+      setRetryAttempt(0);
+      if (sessionChangeStateRef.current.session?.user.id !== nextSession?.user.id) {
+        backendInFlight.current = null;
+        syncInFlight.current = null;
+        setCheckingBackend(false);
+        setSyncing(false);
+      }
       const next = resolveSessionChangeState(sessionChangeStateRef.current, nextSession);
       const storedBackendCheck = next.session
         ? readStoredBackendCheck(backendCheckStorageKeyForUser(adapter.id, next.session.user.id))
@@ -134,6 +170,7 @@ export function useSyncSession(): SyncSessionState {
       }
       sessionChangeStateRef.current = next;
       setSession(next.session);
+      setLoading(false);
       setAuthPending(next.authPending);
       setLastResult(next.lastResult);
       setBackendCheck(next.backendCheck);
@@ -147,27 +184,37 @@ export function useSyncSession(): SyncSessionState {
     [adapter.id, legacyBackendCheckKey],
   );
 
-  const syncNow = useCallback(async () => {
+  const syncNow = useCallback((): Promise<SyncResult> => {
+    if (syncInFlight.current) return syncInFlight.current;
+    const epoch = getWorkspaceEpoch();
     setSyncing(true);
     patchSessionStateRef({ error: '', queueError: '' });
     setError('');
     setQueueError('');
-    try {
-      const result = await engine.syncNow();
-      patchSessionStateRef({ lastResult: result });
-      setLastResult(result);
-      if (!result.ok && result.error) {
-        patchSessionStateRef({ error: result.error });
-        setError(result.error);
-        void runBackendCheck();
-      }
-      return result;
-    } finally {
-      setSyncing(false);
-    }
-  }, [engine, patchSessionStateRef, runBackendCheck]);
+    const operation = (async () => {
+      try {
+        const result = await engine.syncNow();
+        if (!isWorkspaceCurrent(epoch)) return result;
+        patchSessionStateRef({ lastResult: result });
+        setLastResult(result);
+        if (result.ok) setRetryAttempt(0);
+        else {
+          setRetryAttempt((attempt) => isRetryableSyncError(result.error || '') ? attempt + 1 : MAX_AUTO_SYNC_RETRIES + 1);
+          if (result.error) {
+            patchSessionStateRef({ error: result.error });
+            setError(result.error);
+          }
+        }
+        return result;
+      } finally { if (isWorkspaceCurrent(epoch)) setSyncing(false); }
+    })();
+    syncInFlight.current = operation;
+    void operation.finally(() => { if (syncInFlight.current === operation) syncInFlight.current = null; });
+    return operation;
+  }, [engine, patchSessionStateRef]);
 
   const checkBackend = useCallback(async () => {
+    setRetryAttempt(0);
     const result = await runBackendCheck();
     if (
       shouldRetryAfterSuccessfulDiagnosis({
@@ -200,7 +247,8 @@ export function useSyncSession(): SyncSessionState {
 
   useEffect(() => {
     const backendVerificationStatus = backendCheck ? resolveBackendVerification(backendCheck.items).status : null;
-    if (
+    const verificationKey = `${adapter.id}:${session?.user.id || ''}`;
+    if (!initialVerificationAttempted.current.has(verificationKey) &&
       shouldRunInitialBackendVerification({
         configured: adapter.configured,
         signedIn: Boolean(session),
@@ -209,6 +257,7 @@ export function useSyncSession(): SyncSessionState {
         backendVerificationStatus,
       })
     ) {
+      initialVerificationAttempted.current.add(verificationKey);
       void runBackendCheck();
       return;
     }
@@ -222,6 +271,8 @@ export function useSyncSession(): SyncSessionState {
         pending: queue.pending,
         failed: queue.failed,
         backendVerificationStatus,
+        retryAttempt,
+        online: navigator.onLine,
       })
     ) {
       return;
@@ -229,9 +280,30 @@ export function useSyncSession(): SyncSessionState {
 
     const timer = window.setTimeout(() => {
       void syncNow();
-    }, AUTO_SYNC_DELAY_MS);
+    }, retryAttempt ? autoSyncRetryDelay(retryAttempt) : AUTO_SYNC_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [adapter.configured, backendCheck, checkingBackend, queue.failed, queue.pending, runBackendCheck, session, syncing, syncNow]);
+  }, [adapter.configured, adapter.id, backendCheck, checkingBackend, queue.failed, queue.pending, retryAttempt, runBackendCheck, session, syncing, syncNow]);
+
+  useEffect(() => {
+    if (!adapter.configured || !session || loading || !backendCheck || resolveBackendVerification(backendCheck.items).status !== 'verified') return;
+    const poll = () => {
+      if (navigator.onLine === false || document.visibilityState === 'hidden' || retryAttempt > MAX_AUTO_SYNC_RETRIES || retryAttempt > 0) return;
+      void syncNow();
+    };
+    const resume = () => {
+      if (document.visibilityState === 'hidden' || navigator.onLine === false || !isRetryableSyncError(sessionChangeStateRef.current.error)) return;
+      setRetryAttempt(0);
+      void syncNow();
+    };
+    const timer = window.setInterval(poll, AUTO_SYNC_POLL_MS);
+    window.addEventListener('online', resume);
+    document.addEventListener('visibilitychange', resume);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('online', resume);
+      document.removeEventListener('visibilitychange', resume);
+    };
+  }, [adapter.configured, backendCheck, loading, retryAttempt, session, syncNow]);
 
   useEffect(() => {
     sessionChangeStateRef.current = {
@@ -251,7 +323,7 @@ export function useSyncSession(): SyncSessionState {
     }
 
     return adapter.onSessionChange((nextSession) => {
-      applySessionChange(nextSession);
+      void applySessionChange(nextSession).catch((nextError) => { setError(errorMessage(nextError)); setLoading(false); });
     });
   }, [adapter, applySessionChange]);
 
@@ -267,7 +339,7 @@ export function useSyncSession(): SyncSessionState {
       setQueueError('');
       try {
         const nextSession = await adapter.completeOAuthSignIn(claimedCallbackUrl);
-        const next = applySessionChange(nextSession);
+        const next = await applySessionChange(nextSession);
         if (nextSession) {
           await clearDesktopOAuthCallback(window.marknoteDesktop, claimedCallbackUrl);
           void runBackendCheck();
@@ -297,9 +369,9 @@ export function useSyncSession(): SyncSessionState {
     const sessionPromise = callbackUrl ? adapter.completeOAuthSignIn(callbackUrl) : adapter.getSession();
 
     sessionPromise
-      .then((nextSession) => {
+      .then(async (nextSession) => {
         if (!cancelled) {
-          applySessionChange(nextSession);
+          await applySessionChange(nextSession);
           if (nextSession) {
             void runBackendCheck();
           }
@@ -380,7 +452,7 @@ export function useSyncSession(): SyncSessionState {
     setError('');
     try {
       await adapter.signOut();
-      applySessionChange(null);
+      await applySessionChange(null);
     } catch (nextError) {
       const message = errorMessage(nextError);
       patchSessionStateRef({ error: message });

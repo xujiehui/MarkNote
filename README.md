@@ -2,6 +2,8 @@
 
 [English](#english) | [中文](#中文)
 
+整改实现、验证记录和未完成验收见 [整改进度](docs/REMEDIATION_STATUS.md)。
+
 ## English
 
 MarkNote is a cross-platform note workspace for macOS, Windows, and the web. It is built with React, TypeScript, Tailwind CSS, Tiptap, Dexie/IndexedDB, html2canvas, jsPDF, FileSaver, and Electron.
@@ -12,8 +14,8 @@ The app is local-first by default, supports rich text, images, code blocks, fold
 
 - Three-column note workspace with a folder sidebar, note list, and rich editor.
 - Chinese and English UI, persisted in local storage.
-- Local-first persistence through IndexedDB via Dexie.
-- Full-text search across note titles and stripped HTML content.
+- Account-isolated local-first IndexedDB spaces, durable per-editor drafts and recoverable conflict copies.
+- Incremental Worker search across titles, text, folders and tags.
 - Default folders and tags with localized display names.
 - Folder context menu, inline folder rename, and note move actions.
 - Soft-delete trash with restore and permanent delete actions.
@@ -21,15 +23,17 @@ The app is local-first by default, supports rich text, images, code blocks, fold
 - Base64 image insertion through toolbar upload, paste, and drag/drop.
 - Image alignment controls, right-click image menu, and proportional image resizing.
 - Dark code blocks with syntax highlighting, line numbers, language selection, and copy-code buttons.
-- Export current notes as HTML, PDF, and Markdown.
-- Export all notes as a JSON backup.
+- Export current notes as HTML, raster PDF, and Markdown.
+- V2 JSON backups with folders, attachments, history and checksums; separate emergency recovery export.
 - Import Markdown, HTML, and JSON backups.
 - Keyboard shortcuts for new note, save, search, image insert, and code block insert.
 
 ### Run Locally
 
+Use Node.js 24.19.0 and npm 11.9.0, pinned in CI and the version files.
+
 ```bash
-npm install --cache ./.npm-cache
+npm ci --cache ./.npm-cache
 npm run dev
 ```
 
@@ -41,10 +45,11 @@ Open `http://127.0.0.1:5173/` for the landing page, or `http://127.0.0.1:5173/?a
 npm run lint
 npm test
 npm run build
+npm run test:e2e
 npm run verify:release:local
 ```
 
-`verify:release:local` runs the local release gate: the full test suite, desktop packaging, and packaged-app verification. It does not replace the online Supabase release gate; run `verify:release:online` with real Supabase project credentials when network access is available.
+`test:e2e` needs Chromium (Playwright's installed browser or `PLAYWRIGHT_CHROMIUM_EXECUTABLE`). `verify:release:local` additionally runs lint, tests, browser regressions, native packaging and packaged-app checks; run it on the target desktop platform. Real Supabase and native installation/OAuth acceptance remain separate gates.
 
 ### Optional Account Sync
 
@@ -75,7 +80,7 @@ Apply the `marknote-config` bucket migration, upload the JSON response above as 
 
 The GitHub Pages workflow requires that repository variable and verifies Google OAuth with `https://xujiehui.github.io/MarkNote/?app=1` as the web redirect. A Pages build fails instead of publishing a local-only bundle when the variable is missing or the endpoint is absent from the generated assets. After deployment, `check:pages-deployment` downloads the live site and verifies the endpoint, CORS response, runtime payload, absence of embedded keys, and enabled Google Auth provider. In Supabase Auth URL Configuration, set **Site URL** to that Pages URL and add the same exact URL to **Redirect URLs**. Otherwise Supabase silently ignores `redirectTo` and falls back to the default `http://localhost:3000` Site URL.
 
-Then apply the SQL in `supabase/migrations/202606190001_marknote_sync_schema.sql` to your Supabase project. You can print the migration for the Supabase SQL Editor with `npm run print:supabase-migration`.
+Back up and test recovery before applying the legacy schema and `supabase/migrations/202610130001_marknote_sync_v2.sql`. `npm run print:supabase-migration` prints both in one transaction. The current client requires V2 RPCs; follow [SYNC_V2.md](docs/SYNC_V2.md) for deployment, acceptance and rollback boundaries.
 Also apply `supabase/migrations/202607180003_marknote_sync_config_bucket.sql` before uploading `sync-config.json`.
 
 After pasting the migration into the Supabase SQL Editor, you can print a read-only readiness query with `npm run print:supabase-readiness-check` and run it in the same editor. Every row should return `ok = true`; then run `npm run verify:release:online:manual` on this machine.
@@ -87,7 +92,7 @@ SUPABASE_MANAGEMENT_TOKEN=sbp_... npm run check:supabase-migration
 SUPABASE_MANAGEMENT_TOKEN=sbp_... npm run apply:supabase-migration
 ```
 
-`check:supabase-migration` is the schema readiness gate: it lists migration history, checks for the five sync tables, confirms `authenticated` grants, verifies RLS and required policies, verifies the private `attachments` bucket and storage policies, and exits non-zero when the backend is not ready. `apply:supabase-migration` sends the checked-in SQL to the Supabase Management API, then runs the same readiness checks again.
+`check:supabase-migration` checks V2 RPCs, tables, grants, RLS, revoked legacy direct writes and private Storage policies. It exits non-zero when the backend is not ready. `apply:supabase-migration` explicitly applies the checked-in migration, then runs those checks again.
 
 In Google Cloud, create a Web application OAuth client and add your Supabase callback URL as an Authorized redirect URI: `https://<project-ref>.supabase.co/auth/v1/callback`. In Supabase Auth, enable the Google provider and paste that OAuth Client ID and Client Secret. Then add your local and production MarkNote URLs to Supabase Auth redirect URLs, for example `http://127.0.0.1:5173/?app=1`. For CLI OAuth release checks, also allow `http://127.0.0.1:**/auth/callback`; for the packaged desktop app, add `marknote://auth/callback`. If the web app is not served from the current browser URL, return `supabase.authRedirectUrl` from the sync configuration endpoint.
 
@@ -100,15 +105,15 @@ npm run check:supabase-sync
 
 This verifies that the configured Supabase project URL resolves, Supabase Auth redirects the Google provider flow to Google, and Google accepts the configured OAuth client. A DNS failure means the project URL is wrong, inactive, or not reachable yet. `invalid_client` means the Google OAuth Client ID or Client Secret configured in Supabase Auth does not match a valid Google Cloud Web OAuth client.
 
-`check:supabase-sync` verifies the Supabase project is reachable and probes the sync tables, including `profiles`, `devices`, `folders`, `notes`, and `attachments`. MarkNote sync is login-only, so anonymous table probes may report `PGRST205` or permission errors. If you set `SUPABASE_ACCESS_TOKEN` to a signed-in user's access token, the script also verifies authenticated table access, inserts/updates/deletes temporary folder/note/attachment rows, and runs an attachment Storage canary: upload, overwrite, download, and delete.
+`check:supabase-sync` probes connectivity. Authenticated checks require the V2 readiness RPC and test attachment Storage; legacy direct table writes are intentionally disabled. The readiness mutation test rolls back its diagnostic data. Metadata readiness and a Storage canary do not replace two-device conflict and concurrency acceptance.
 
-For release verification, run the online gate after the migration is applied. It verifies Google OAuth configuration, Supabase schema readiness, authenticated Data API writes, and attachment Storage:
+For release verification, run the online gate after the migration is applied. It verifies Google OAuth configuration, Supabase schema readiness, authenticated V2 readiness checks, and attachment Storage:
 
 ```bash
 npm run verify:release:online
 ```
 
-If you applied the migration manually in the Supabase SQL Editor and do not have a Supabase personal access token on this machine, run the manual online gate instead. It skips the Management API schema-readiness check and proves the app-facing path with Google OAuth, authenticated Data API writes, and attachment Storage:
+If you applied the migration manually in the Supabase SQL Editor and do not have a Supabase personal access token on this machine, run the manual online gate instead. It skips the Management API schema-readiness check and proves the app-facing path with Google OAuth, authenticated V2 readiness checks, and attachment Storage:
 
 ```bash
 npm run verify:release:online:manual
@@ -147,7 +152,7 @@ npm run dist:win
 
 Run `check:desktop-package` after `desktop:pack` to verify that `release/mac/MarkNote.app` contains the current frontend bundle, Electron OAuth callback bridge, sync table write diagnostics, attachment Storage canary, and attachment hydration code.
 
-Current macOS outputs:
+Expected macOS output names (native builds require platform verification):
 
 - `release/mac/MarkNote.app`
 - `release/MarkNote-0.1.1-mac-x64.dmg`
@@ -155,7 +160,7 @@ Current macOS outputs:
 - `release/MarkNote-0.1.1-mac-arm64.dmg`
 - `release/MarkNote-0.1.1-mac-arm64.zip`
 
-The local macOS build is unsigned because no valid Developer ID certificate is available in this environment. For public distribution, sign and notarize with an active Apple Developer ID certificate.
+For public distribution, sign and notarize with an active Apple Developer ID certificate. This Linux cloud validation does not verify native signing, installation or OAuth callbacks.
 
 ### GitHub Actions Packaging
 
@@ -183,8 +188,8 @@ MarkNote 是一款面向 macOS、Windows 和 Web 的跨平台笔记工作台，�
 
 - 三栏笔记工作区：文件夹侧边栏、笔记列表和富文本编辑器。
 - 中文和英文界面，语言选择会保存在本地。
-- 通过 Dexie 使用 IndexedDB 做本地优先持久化。
-- 支持按标题和正文纯文本进行全文搜索。
+- 按访客/账号隔离 IndexedDB 空间，持久编辑器草稿与冲突副本保全。
+- Worker 增量搜索标题、正文、目录和标签。
 - 默认文件夹和标签支持本地化显示名称。
 - 支持文件夹右键菜单、行内重命名和笔记移动。
 - 回收站软删除，支持还原和彻底删除。
@@ -192,15 +197,17 @@ MarkNote 是一款面向 macOS、Windows 和 Web 的跨平台笔记工作台，�
 - 支持通过工具栏上传、粘贴、拖拽插入 Base64 图片。
 - 支持图片对齐、图片右键菜单和等比拖拽缩放。
 - 深色代码块支持语法高亮、行号、语言选择和一键复制。
-- 支持将当前笔记导出为 HTML、PDF 和 Markdown。
-- 支持将全部笔记导出为 JSON 备份。
+- 支持将当前笔记导出为 HTML、图像式 PDF 和 Markdown。
+- V2 JSON 备份保留目录、附件、历史和校验；保存失败时可单独导出应急恢复文件。
 - 支持导入 Markdown、HTML 和 JSON 备份。
 - 支持新建笔记、保存、搜索、插入图片和插入代码块快捷键。
 
 ### 本地运行
 
+使用 Node.js 24.19.0、npm 11.9.0，与版本文件及 CI 保持一致。
+
 ```bash
-npm install --cache ./.npm-cache
+npm ci --cache ./.npm-cache
 npm run dev
 ```
 
@@ -212,10 +219,11 @@ npm run dev
 npm run lint
 npm test
 npm run build
+npm run test:e2e
 npm run verify:release:local
 ```
 
-`verify:release:local` 会运行本地发布门禁：完整测试、桌面打包，以及打包应用自检。它不能替代在线 Supabase 发布门禁；网络可用时仍需要用真实项目凭据运行 `verify:release:online`。
+`test:e2e` 需要 Chromium，可使用 Playwright 安装的浏览器或 `PLAYWRIGHT_CHROMIUM_EXECUTABLE` 指定路径。`verify:release:local` 还执行 lint、完整测试、浏览器回归、原生打包及制品自检，应在目标桌面平台运行。真实 Supabase、多平台安装与 OAuth 仍需单独验收。
 
 ### 可选账号同步
 
@@ -248,7 +256,7 @@ GitHub Pages 工作流会强制读取这个仓库变量，并使用 `https://xuj
 
 GitHub Actions 不读取构建机上的 `.env.local`。要让 macOS/Windows 分发产物启用云同步，请在仓库的 Actions Variables 中设置 `MARKNOTE_SYNC_CONFIG_URL`；工作流会把它作为 `VITE_SYNC_CONFIG_URL` 传给 Vite。未设置时构建仍会成功，但产物明确运行在本地模式。
 
-然后将 `supabase/migrations/202606190001_marknote_sync_schema.sql` 中的 SQL 应用到 Supabase 项目。可以用 `npm run print:supabase-migration` 打印要粘贴到 Supabase SQL Editor 的迁移 SQL。
+先备份并验证恢复，再应用旧 schema 与 `supabase/migrations/202610130001_marknote_sync_v2.sql`。`npm run print:supabase-migration` 打印包含两者的事务。当前客户端要求 V2 RPC；部署、验收和回滚边界见 [SYNC_V2.md](docs/SYNC_V2.md)。
 同时应用 `supabase/migrations/202607180003_marknote_sync_config_bucket.sql`，再上传 `sync-config.json`。
 
 在 Supabase SQL Editor 中粘贴迁移后，可以用 `npm run print:supabase-readiness-check` 打印只读 readiness 查询，并在同一个 SQL Editor 中执行。每一行都应返回 `ok = true`；然后在本机运行 `npm run verify:release:online:manual`。
@@ -260,7 +268,7 @@ SUPABASE_MANAGEMENT_TOKEN=sbp_... npm run check:supabase-migration
 SUPABASE_MANAGEMENT_TOKEN=sbp_... npm run apply:supabase-migration
 ```
 
-`check:supabase-migration` 是 schema readiness gate：它会读取迁移历史，检查五张同步表、`authenticated` grants、RLS 和所需 policies，以及私有 `attachments` bucket 和 Storage policies；后端未就绪时会非零退出。`apply:supabase-migration` 会把仓库里的 SQL 发送到 Supabase Management API，然后再次运行同一组 readiness checks。
+`check:supabase-migration` 检查 V2 RPC、表、grants、RLS、旧表直接写入已撤销，以及私有 Storage policies；后端未就绪时非零退出。`apply:supabase-migration` 显式应用仓库中的迁移，再执行相同检查。
 
 在 Google Cloud 中创建 Web application 类型的 OAuth client，并把 Supabase callback URL 加到 Authorized redirect URI：`https://<project-ref>.supabase.co/auth/v1/callback`。然后在 Supabase Auth 中启用 Google provider，填入这个 OAuth Client ID 和 Client Secret。接着把本地和生产 MarkNote URL 加到 Supabase Auth redirect URLs，例如 `http://127.0.0.1:5173/?app=1`。CLI OAuth 发布检查还需要允许 `http://127.0.0.1:**/auth/callback`；如果使用打包后的桌面应用，还要加入 `marknote://auth/callback`。如果 Web 应用不是从当前浏览器 URL 提供服务，请从同步配置接口返回 `supabase.authRedirectUrl`。
 
@@ -273,15 +281,15 @@ npm run check:supabase-sync
 
 它会验证已配置的 Supabase 项目 URL 是否可解析、Supabase Auth 的 Google provider 是否会跳转到 Google，以及 Google 是否接受当前 OAuth client。这里如果出现 DNS 失败，说明项目 URL 错误、项目未激活，或当前网络还访问不到；如果出现 `invalid_client`，说明 Supabase Auth 中配置的 Google OAuth Client ID 或 Secret 没有对应到有效的 Google Cloud Web OAuth client。
 
-`check:supabase-sync` 会验证 Supabase 项目可达，并探测 `profiles`、`devices`、`folders`、`notes`、`attachments` 等同步表。MarkNote 同步只面向登录用户，所以匿名探测出现 `PGRST205` 或权限错误可能是正常的；如果把 `SUPABASE_ACCESS_TOKEN` 设置为已登录用户的 access token，脚本还会验证 authenticated 表访问，临时插入/更新/删除 folder/note/attachment 行，以及附件 Storage 的上传、覆盖、下载和删除 canary。
+`check:supabase-sync` 探测连通性；已登录检查要求 V2 readiness RPC 并测试附件 Storage。旧表直接写入已禁用，readiness 的诊断变更会回滚。元数据及 Storage canary 不能替代双设备冲突与真实并发验收。
 
-发布验收时，在迁移应用后运行 online gate。它会验证 Google OAuth 配置、Supabase schema readiness、authenticated Data API 写入，以及附件 Storage：
+发布验收时，在迁移应用后运行 online gate。它会验证 Google OAuth 配置、Supabase schema readiness、authenticated V2 readiness 检查，以及附件 Storage：
 
 ```bash
 npm run verify:release:online
 ```
 
-如果你是在 Supabase SQL Editor 中手动应用迁移，并且本机没有 Supabase personal access token，请运行 manual online gate。它会跳过 Management API 的 schema readiness 检查，用 Google OAuth、authenticated Data API 写入和附件 Storage 证明应用侧链路：
+如果你是在 Supabase SQL Editor 中手动应用迁移，并且本机没有 Supabase personal access token，请运行 manual online gate。它会跳过 Management API 的 schema readiness 检查，用 Google OAuth、authenticated V2 readiness 检查和附件 Storage 证明应用侧链路：
 
 ```bash
 npm run verify:release:online:manual
@@ -300,7 +308,7 @@ SUPABASE_ACCESS_TOKEN=eyJ... npm run check:supabase-sync:auth
 # CI 也可以设置 MARKNOTE_REQUIRE_SUPABASE_ACCESS_TOKEN=1，并单独提供 SUPABASE_ACCESS_TOKEN。
 ```
 
-`check:supabase-sync:auth` 缺少 `SUPABASE_ACCESS_TOKEN` 时会失败，避免 authenticated Data API 与 Storage 检查被静默跳过。`check:supabase-sync:oauth` 则通过浏览器登录避免手工复制 token。也可以在 MarkNote 内登录并点击“诊断同步”，用当前应用会话运行已登录表写入和 Storage canary。如果登录后应用内“诊断同步”仍显示 `PGRST205`，有 Supabase personal access token 时先运行 `npm run check:supabase-migration`；然后用该 token 运行 `npm run apply:supabase-migration`，或运行 `npm run print:supabase-migration` 并把 SQL 粘贴到 Supabase SQL Editor，可选地继续运行 `npm run print:supabase-readiness-check` 打印出的 SQL，最后用 `npm run verify:release:online:manual` 验收。
+`check:supabase-sync:auth` 缺少 `SUPABASE_ACCESS_TOKEN` 时会失败，避免 authenticated V2 RPC 与 Storage 检查被静默跳过。`check:supabase-sync:oauth` 则通过浏览器登录避免手工复制 token。也可以在 MarkNote 内登录并点击“诊断同步”，用当前应用会话运行已登录表写入和 Storage canary。如果登录后应用内“诊断同步”仍显示 `PGRST205`，有 Supabase personal access token 时先运行 `npm run check:supabase-migration`；然后用该 token 运行 `npm run apply:supabase-migration`，或运行 `npm run print:supabase-migration` 并把 SQL 粘贴到 Supabase SQL Editor，可选地继续运行 `npm run print:supabase-readiness-check` 打印出的 SQL，最后用 `npm run verify:release:online:manual` 验收。
 
 迁移可以在已有 Supabase 项目上重复执行。如果旧表已经存在，后补的外键会以 `NOT VALID` 添加，避免历史孤儿数据中断部署；新的同步写入仍会被外键约束保护。清理旧孤儿数据后，可以按需手动 validate `notes_user_folder_fk` 和 `attachments_user_note_fk`。
 
@@ -320,7 +328,7 @@ npm run dist:win
 
 `desktop:pack` 后运行 `check:desktop-package`，确认 `release/mac/MarkNote.app` 内含当前前端 bundle、Electron OAuth 回调桥、同步表写入诊断、附件 Storage canary，以及附件水合代码。
 
-当前 macOS 输出：
+预期 macOS 输出名称（仍需原生平台构建与验收）：
 
 - `release/mac/MarkNote.app`
 - `release/MarkNote-0.1.1-mac-x64.dmg`
@@ -328,7 +336,7 @@ npm run dist:win
 - `release/MarkNote-0.1.1-mac-arm64.dmg`
 - `release/MarkNote-0.1.1-mac-arm64.zip`
 
-本地 macOS 构建未签名，因为当前环境没有可用的 Developer ID 证书。如需公开分发，请使用有效的 Apple Developer ID 证书进行签名和 notarize。
+公开分发前应使用有效的 Apple Developer ID 证书签名并 notarize。本次 Linux 云环境验证没有覆盖原生签名、安装与 OAuth 回调。
 
 ### GitHub Actions 打包
 

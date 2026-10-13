@@ -1,0 +1,93 @@
+{
+  "validated_at_utc": "2026-10-13T04:38:39.192428+00:00",
+  "base_commit": "54b09395b5b5cec5b99ba8338d667db9e0cdabbd",
+  "delivery": "validation executed on the working tree above base_commit; source-manifest binds validated files; subsequent Git submission does not establish hosted migration or application deployment",
+  "platform": "Linux-6.18.44-x86_64-with-glibc2.41",
+  "node": "v24.19.0",
+  "npm": "11.9.0",
+  "chromium": "Chromium 154.0.8037.57 built on Debian GNU/Linux 13 (trixie)",
+  "lockfile_sha256": "1a0331aa5b175b2bf4ef51e1af826f68d6a6f4d8ca8712c508cceafa188224a9",
+  "source_manifest_sha256": "61a1f585fdefddb57dee1622c3093924a50ed3f3791d2fb2d0253fb0c830bda8",
+  "source_manifest_entries": 181,
+  "checks": [
+    {
+      "command": "npm ci --cache /workspace/.npm-cache --no-audit --no-fund",
+      "status": "passed",
+      "exit_code": 0,
+      "log": "install.log"
+    },
+    {
+      "command": "npm run lint",
+      "status": "passed",
+      "exit_code": 0,
+      "log": "lint.log"
+    },
+    {
+      "command": "npm test",
+      "status": "passed",
+      "exit_code": 0,
+      "passed_suites": 61,
+      "total_suites": 61,
+      "log": "tests.log"
+    },
+    {
+      "command": "npm run desktop:build",
+      "status": "passed",
+      "exit_code": 0,
+      "log": "desktop-build.log"
+    },
+    {
+      "command": "npx playwright test",
+      "status": "passed",
+      "exit_code": 0,
+      "passed_tests": 13,
+      "total_tests": 13,
+      "log": "browser.log"
+    },
+    {
+      "command": "git diff --check",
+      "status": "passed",
+      "exit_code": 0
+    }
+  ],
+  "dependency_audit": {
+    "production": {
+      "info": 0,
+      "low": 0,
+      "moderate": 0,
+      "high": 0,
+      "critical": 0,
+      "total": 0
+    },
+    "all_dependencies": {
+      "info": 0,
+      "low": 0,
+      "moderate": 8,
+      "high": 0,
+      "critical": 0,
+      "total": 8
+    },
+    "build_exception": "8 moderate package entries from sprintf-js advisory GHSA-hp3w-g68c-fv3c; see SECURITY_VALIDATION.md"
+  },
+  "known_build_warnings": [
+    "large editor chunk",
+    "importExport.ts has both static and dynamic imports"
+  ],
+  "environment_draft": {
+    "install_script": "saved",
+    "start_skill": "saved",
+    "publication": "not performed"
+  },
+  "not_executed": [
+    "real Supabase/PostgREST/Storage and OAuth acceptance",
+    "PostgreSQL multiple-connection contention",
+    "Mac Intel/ARM and Windows native installation, signing, upgrade and OAuth",
+    "fixed-hardware p95 and memory performance budgets",
+    "real deployment upgrade, staged rollout and rollback drills"
+  ],
+  "remaining_development": [
+    "unified Blob attachment persistence",
+    "total historical byte policy and rejected-upload orphan reclamation",
+    "complete i18n, semantic dark styles and further module separation"
+  ]
+}

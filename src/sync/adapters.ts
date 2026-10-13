@@ -1,6 +1,7 @@
 import { DisabledSyncAdapter } from './disabledAdapter';
 import { hasSyncConfigSource, loadSyncConfig } from './env';
 import { SupabaseSyncAdapter } from './supabaseAdapter';
+import type { MutationReceipt, RemoteChangePage, SyncMutation } from './protocol';
 import type {
   AuthSession,
   AuthSessionChangeHandler,
@@ -86,8 +87,20 @@ class BackendConfiguredSupabaseAdapter implements RemoteSyncAdapter {
     }
   }
 
-  async registerDevice(device: SyncDevice): Promise<void> {
-    return (await this.requireAdapter()).registerDevice(device);
+  async registerDevice(device: SyncDevice, expectedUserId?: string): Promise<void> {
+    return (await this.requireAdapter()).registerDevice(device, expectedUserId);
+  }
+
+  async pullChanges(afterSequence: number, upperBound?: number, expectedUserId?: string): Promise<RemoteChangePage> {
+    return (await this.requireAdapter()).pullChanges(afterSequence, upperBound, expectedUserId);
+  }
+
+  async pushMutations(mutations: SyncMutation[], expectedUserId?: string): Promise<MutationReceipt[]> {
+    return (await this.requireAdapter()).pushMutations(mutations, expectedUserId);
+  }
+
+  async flushAttachmentGarbage(expectedUserId?: string): Promise<void> {
+    return (await this.requireAdapter()).flushAttachmentGarbage(expectedUserId);
   }
 
   async pull(lastPulledAt: number): Promise<RemoteSnapshot> {
@@ -98,12 +111,12 @@ class BackendConfiguredSupabaseAdapter implements RemoteSyncAdapter {
     return (await this.requireAdapter()).push(payload);
   }
 
-  async uploadAttachment(attachment: ImageAttachment): Promise<{ storagePath: string; publicUrl?: string }> {
-    return (await this.requireAdapter()).uploadAttachment(attachment);
+  async uploadAttachment(attachment: ImageAttachment, expectedUserId?: string): Promise<{ storagePath: string; publicUrl?: string }> {
+    return (await this.requireAdapter()).uploadAttachment(attachment, expectedUserId);
   }
 
-  async downloadAttachment(attachment: ImageAttachment): Promise<{ data: string }> {
-    return (await this.requireAdapter()).downloadAttachment(attachment);
+  async downloadAttachment(attachment: ImageAttachment, expectedUserId?: string): Promise<{ data: string }> {
+    return (await this.requireAdapter()).downloadAttachment(attachment, expectedUserId);
   }
 
   private requireAdapter(): Promise<SupabaseSyncAdapter> {

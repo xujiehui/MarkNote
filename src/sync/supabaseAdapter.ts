@@ -1,5 +1,8 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { Folder, ImageAttachment, Note, SyncDevice } from '../types';
+import type { ImageAttachment, SyncDevice, SyncEntity } from '../types';
+import { isSafeContentMimeType, MAX_ATTACHMENT_BYTES, sanitizeContentUrl } from '../lib/sanitizeContent';
+import { assertSyncInteger, SYNC_PROTOCOL_CHECK_NAME, SYNC_PROTOCOL_VERSION, SYNC_PULL_RPC, SYNC_PUSH_RPC } from './protocol';
+import type { MutationReceipt, RemoteChange, RemoteChangePage, RemoteEntityValue, SyncMutation } from './protocol';
 import { ATTACHMENT_STORAGE_CANARY_CHECK_NAME, SYNC_TABLE_WRITES_CHECK_NAME } from './backendVerification';
 import {
   errorWithCauseMessage,
@@ -36,44 +39,7 @@ const TABLE_CHECKS = [
 
 interface SupabaseSyncAdapterOptions {
   authRedirectUrl?: string;
-}
-
-interface RemoteFolderRow {
-  id: string;
-  user_id?: string;
-  name: string;
-  sort_order: number;
-  created_at: string;
-  updated_at: string;
-  deleted_at: string | null;
-  version: number | null;
-}
-
-interface RemoteNoteRow {
-  id: string;
-  user_id?: string;
-  folder_id: string;
-  title: string;
-  content: string;
-  raw_content: string | null;
-  tags: string[] | null;
-  pinned: boolean;
-  created_at: string;
-  updated_at: string;
-  deleted_at: string | null;
-  version: number | null;
-}
-
-interface RemoteAttachmentRow {
-  id: string;
-  user_id?: string;
-  note_id: string;
-  storage_path: string;
-  mime_type: string;
-  size_bytes: number | null;
-  created_at: string;
-  updated_at: string;
-  deleted_at: string | null;
+  storageFactory?: (session: AuthSession) => SupabaseClient['storage'];
 }
 
 interface RemoteDeviceRow {
@@ -88,6 +54,8 @@ export class SupabaseSyncAdapter implements RemoteSyncAdapter {
   readonly name = 'Supabase';
   readonly configured: boolean;
   private readonly client: SupabaseClient | null;
+  private readonly publishableKey: string | undefined;
+  private readonly storageFactory: ((session: AuthSession) => SupabaseClient['storage']) | undefined;
   private readonly url: string | undefined;
   private readonly authRedirectUrl: string | undefined;
 
@@ -98,12 +66,15 @@ export class SupabaseSyncAdapter implements RemoteSyncAdapter {
     options: SupabaseSyncAdapterOptions = {},
   ) {
     this.url = url;
+    this.publishableKey = publishableKey;
+    this.storageFactory = options.storageFactory;
     this.authRedirectUrl = options.authRedirectUrl;
     this.configured = Boolean(url && publishableKey);
     this.client =
       client ??
       (this.configured && url && publishableKey
         ? createClient(url, publishableKey, {
+            global: { fetch: fetchWithSyncTimeout },
             auth: {
               detectSessionInUrl: false,
               flowType: 'pkce',
@@ -245,19 +216,24 @@ export class SupabaseSyncAdapter implements RemoteSyncAdapter {
       return checkResult(checkedAt, items);
     }
 
-    const tableWriteCheck = await checkSyncTableWrites(client, session.user.id);
+    const tableWriteCheck = await checkSyncTableWrites(client, session);
     items.push(tableWriteCheck);
+    items.push(checkItem(SYNC_PROTOCOL_CHECK_NAME, tableWriteCheck.status, tableWriteCheck.message, tableWriteCheck.code));
     if (tableWriteCheck.status === 'error') {
       return checkResult(checkedAt, items);
     }
-    items.push(...(await checkAttachmentStorage(client, session.user.id)));
+    await this.assertSessionStillUser(session.user.id);
+    items.push(...(await checkAttachmentStorage({ storage: this.storageForSession(session) }, session.user.id)));
+    await this.assertSessionStillUser(session.user.id);
 
     return checkResult(checkedAt, items);
   }
 
-  async registerDevice(device: SyncDevice): Promise<void> {
+  async registerDevice(device: SyncDevice, expectedUserId?: string): Promise<void> {
+    const deadline = Date.now() + 28_000;
     const client = this.requireClient();
     const session = await this.getSession();
+    if (session && expectedUserId && session.user.id !== expectedUserId) throw new Error('Account changed; the previous request was discarded.');
     if (!session) {
       return;
     }
@@ -268,121 +244,229 @@ export class SupabaseSyncAdapter implements RemoteSyncAdapter {
       platform: device.provider,
       last_seen_at: toIso(device.lastSeenAt),
     };
-    const { error } = await client.from(DEVICES_TABLE).upsert(row, { onConflict: 'user_id,id' });
+    const { error } = await rpcWithTimeout(client.from(DEVICES_TABLE).upsert(row, { onConflict: 'user_id,id' }).setHeader('Authorization', sessionAuthorization(session)), remainingSyncTime(deadline));
+    await this.assertSessionStillUser(session.user.id);
     if (error) {
       throw supabaseSyncError(error, 'Could not register this device');
     }
   }
 
-  async pull(lastPulledAt: number): Promise<RemoteSnapshot> {
-    const client = this.requireClient();
-    const since = toIso(lastPulledAt || 0);
-    const [folders, notes, attachments] = await Promise.all([
-      client.from(FOLDERS_TABLE).select('*').gt('updated_at', since),
-      client.from(NOTES_TABLE).select('*').gt('updated_at', since),
-      client.from(ATTACHMENTS_TABLE).select('*').gt('updated_at', since),
-    ]);
-
-    if (folders.error) {
-      throw supabaseSyncError(folders.error, 'Could not pull folders');
-    }
-    if (notes.error) {
-      throw supabaseSyncError(notes.error, 'Could not pull notes');
-    }
-    if (attachments.error) {
-      throw supabaseSyncError(attachments.error, 'Could not pull attachments');
-    }
-
-    return {
-      folders: ((folders.data || []) as RemoteFolderRow[]).map(folderFromRow),
-      notes: ((notes.data || []) as RemoteNoteRow[]).map(noteFromRow),
-      attachments: ((attachments.data || []) as RemoteAttachmentRow[]).map(attachmentFromRow),
-      serverTime: Date.now(),
-    };
+  /** Old timestamp/upsert clients must never bypass the versioned protocol. */
+  async pull(_lastPulledAt: number): Promise<RemoteSnapshot> {
+    void _lastPulledAt;
+    throw new Error('Versioned sync protocol is required. Use pullChanges with a sequence cursor.');
   }
 
-  async push(payload: PushPayload): Promise<{ syncedAt: number }> {
+  async push(_payload: PushPayload): Promise<{ syncedAt: number }> {
+    void _payload;
+    throw new Error('Versioned sync protocol is required. Use pushMutations with immutable mutation ids and expected revisions.');
+  }
+
+  async pullChanges(afterSequence: number, upperBound?: number, expectedUserId?: string): Promise<RemoteChangePage> {
+    const deadline = Date.now() + 28_000;
+    assertSyncInteger(afterSequence, 'Sync cursor');
+    if (upperBound !== undefined) {
+      assertSyncInteger(upperBound, 'Sync snapshot bound');
+      if (upperBound < afterSequence) throw new Error('Sync snapshot bound precedes the cursor.');
+    }
     const client = this.requireClient();
     const session = await this.getSession();
-    if (!session) {
-      throw new Error('Please sign in before syncing.');
+    if (!session || (expectedUserId && session.user.id !== expectedUserId)) throw new Error('Account changed or signed out; the previous request was discarded.');
+    const { data, error } = await rpcForSession(client, SYNC_PULL_RPC, {
+      p_after_seq: afterSequence,
+      p_upper_bound: upperBound ?? null,
+      p_limit: 200,
+    }, session, deadline);
+    await this.assertSessionStillUser(session.user.id);
+    if (error) throw protocolError(error, 'Could not pull versioned changes');
+    const page = record(data, 'sync page');
+    const nextSequence = integer(page.nextSequence, 'Next sync cursor');
+    const bound = integer(page.upperBound, 'Sync snapshot bound');
+    const serverTime = integer(page.serverTime, 'Server time');
+    if (typeof page.hasMore !== 'boolean' || !Array.isArray(page.changes)
+      || bound < afterSequence || nextSequence < afterSequence || nextSequence > bound
+      || (upperBound !== undefined && upperBound !== bound)) {
+      throw new Error('Invalid versioned sync page.');
     }
-
-    const userId = session.user.id;
-    const missingStoragePath = payload.attachments.find((attachment) => !attachment.storagePath);
-    if (missingStoragePath) {
-      throw new Error(`Could not push attachments: Attachment storage path is missing for ${missingStoragePath.id}.`);
-    }
-
-    const folderRows = payload.folders.map((folder) => folderToRow(folder, userId));
-    const noteRows = payload.notes.map((note) => noteToRow(note, userId));
-    const attachmentRows = payload.attachments.map((attachment) => attachmentToRow(attachment, userId));
-
-    if (folderRows.length) {
-      const { error } = await client.from(FOLDERS_TABLE).upsert(folderRows, { onConflict: 'user_id,id' });
-      if (error) {
-        throw supabaseSyncError(error, 'Could not push folders');
+    const changes = page.changes.map(changeFromWire);
+    let previousSequence = afterSequence;
+    for (const change of changes) {
+      if (change.sequence <= previousSequence || change.sequence > nextSequence) {
+        throw new Error('Versioned sync changes are out of sequence.');
       }
+      previousSequence = change.sequence;
     }
-    if (noteRows.length) {
-      const { error } = await client.from(NOTES_TABLE).upsert(noteRows, { onConflict: 'user_id,id' });
-      if (error) {
-        throw supabaseSyncError(error, 'Could not push notes');
-      }
+    if ((page.hasMore && (changes.length === 0 || nextSequence !== previousSequence))
+      || (!page.hasMore && nextSequence !== bound)) {
+      throw new Error('Invalid versioned sync paging progress.');
     }
-    if (attachmentRows.length) {
-      const { error } = await client.from(ATTACHMENTS_TABLE).upsert(attachmentRows, { onConflict: 'user_id,id' });
-      if (error) {
-        throw supabaseSyncError(error, 'Could not push attachments');
-      }
-    }
+    return { changes, nextSequence, upperBound: bound, hasMore: page.hasMore, serverTime };
+  }
 
-    const deletedAt = new Date().toISOString();
-    await Promise.all([
-      ...payload.deleted.folders.map((id) => softDeleteRemote(client, FOLDERS_TABLE, id, deletedAt, userId)),
-      ...payload.deleted.notes.map((id) => softDeleteRemote(client, NOTES_TABLE, id, deletedAt, userId)),
-      ...payload.deleted.attachments.map((attachment) => softDeleteAttachmentRemote(client, attachment, deletedAt, userId)),
-    ]).then((results) => {
-      const failed = results.find((result) => result.error);
-      if (failed?.error) {
-        throw supabaseSyncError(failed.error, 'Could not push deletes');
+  async pushMutations(mutations: SyncMutation[], expectedUserId?: string): Promise<MutationReceipt[]> {
+    const deadline = Date.now() + 28_000;
+    const client = this.requireClient();
+    const session = await this.getSession();
+    if (session && expectedUserId && session.user.id !== expectedUserId) throw new Error('Account changed; the previous request was discarded.');
+    if (!session) throw new Error('Please sign in before syncing.');
+    sessionAuthorization(session);
+    const ids = new Set<string>();
+    const wire = mutations.map((mutation) => {
+      assertSyncInteger(mutation.expectedRevision, 'Expected remote revision');
+      assertSyncInteger(mutation.localRevision, 'Local revision');
+      if (!mutation.mutationId || ids.has(mutation.mutationId)) throw new Error('Mutation ids must be unique and nonempty.');
+      ids.add(mutation.mutationId);
+      if (mutation.operation === 'upsert' && (!mutation.value || mutation.value.id !== mutation.entityId)) {
+        throw new Error('Mutation entity id does not match its document.');
       }
+      if (mutation.operation === 'upsert' && mutation.entity === 'attachment') {
+        if ((mutation.value as ImageAttachment).historyOnly) throw new Error('History-only attachments must remain local.');
+        const path = (mutation.value as ImageAttachment).storagePath;
+        if (!path) throw new Error(`Attachment storage path is missing for ${mutation.entityId}.`);
+        assertOwnedStoragePath(path, session.user.id);
+      }
+      return { ...mutation, value: mutation.operation === 'delete' ? null : documentForWire(mutation.entity, mutation.value!) };
     });
-
-    return { syncedAt: Date.now() };
+    const receipts: MutationReceipt[] = [];
+    for (let offset = 0; offset < wire.length; offset += 100) {
+      const batch = wire.slice(offset, offset + 100);
+      await this.assertSessionStillUser(session.user.id);
+      const { data, error } = await rpcForSession(client, SYNC_PUSH_RPC, { p_mutations: batch }, session, deadline);
+      await this.assertSessionStillUser(session.user.id);
+      if (error) throw protocolError(error, 'Could not push versioned mutations');
+      if (!Array.isArray(data) || data.length !== batch.length) throw new Error('Incomplete versioned mutation receipts.');
+      for (let index = 0; index < batch.length; index += 1) {
+        const receipt = receiptFromWire(data[index]);
+        const sent = batch[index];
+        if (receipt.mutationId !== sent.mutationId || receipt.localRevision !== sent.localRevision
+          || receipt.entity !== sent.entity || receipt.entityId !== sent.entityId) {
+          throw new Error('Versioned mutation receipt does not match its frozen generation.');
+        }
+        receipts.push(receipt);
+      }
+    }
+    if (receipts.some((receipt) => receipt.status === 'applied' && receipt.value === null)) {
+      await this.flushAttachmentGarbage(session.user.id, deadline);
+    }
+    return receipts;
   }
 
-  async uploadAttachment(attachment: ImageAttachment): Promise<{ storagePath: string; publicUrl?: string }> {
+  async flushAttachmentGarbage(expectedUserId?: string, deadline = Date.now() + 28_000): Promise<void> {
     const client = this.requireClient();
     const session = await this.getSession();
+    if (session && expectedUserId && session.user.id !== expectedUserId) throw new Error('Account changed; the previous request was discarded.');
+    if (!session) throw new Error('Please sign in before removing attachments.');
+    // Bound each pass; a later automatic sync resumes remaining jobs.
+    for (let page = 0; page < 10; page += 1) {
+      await this.assertSessionStillUser(session.user.id);
+      const { data, error } = await rpcForSession(client, 'marknote_sync_collect_storage_v2', { p_limit: 100 }, session, deadline);
+      await this.assertSessionStillUser(session.user.id);
+      if (error) throw protocolError(error, 'Could not collect purged attachment files');
+      if (!Array.isArray(data) || data.some((path) => typeof path !== 'string')) throw new Error('Invalid attachment cleanup jobs.');
+      if (data.length === 0) return;
+      const paths = data as string[];
+      paths.forEach((path) => assertOwnedStoragePath(path, session.user.id));
+      const bucket = this.storageForSession(session, deadline).from(ATTACHMENTS_BUCKET);
+      const removed = await bucket.remove(paths);
+      await this.assertSessionStillUser(session.user.id);
+      if (removed.error && !isSupabaseStorageObjectMissingError(removed.error)) {
+        throw supabaseSyncError(removed.error, 'Could not remove purged attachment files');
+      }
+      for (const path of paths) {
+        const verify = await bucket.list(storagePathDirectory(path),
+          { limit: 1, search: storagePathFilename(path) }, { signal: AbortSignal.timeout(remainingSyncTime(deadline)) });
+        if (verify.error || (verify.data || []).some((entry) => entry.name === storagePathFilename(path))) {
+          throw new Error('Purged attachment file remains visible; cleanup will be retried.');
+        }
+      }
+      const acknowledged = await rpcForSession(client, 'marknote_sync_ack_storage_v2', { p_paths: paths }, session, deadline);
+      await this.assertSessionStillUser(session.user.id);
+      if (acknowledged.error) throw protocolError(acknowledged.error, 'Could not acknowledge removed attachment files');
+    }
+  }
+
+  async uploadAttachment(attachment: ImageAttachment, expectedUserId?: string): Promise<{ storagePath: string; publicUrl?: string }> {
+    const deadline = Date.now() + 28_000;
+    this.requireClient();
+    const session = await this.getSession();
+    if (session && expectedUserId && session.user.id !== expectedUserId) throw new Error('Account changed; the previous request was discarded.');
     if (!session) {
       throw new Error('Please sign in before uploading attachments.');
     }
+    if (attachment.historyOnly) throw new Error('History-only attachments must remain local.');
+    if (!isSafeContentMimeType(attachment.mimeType, 'file') || !sanitizeContentUrl(attachment.data, 'file')
+      || attachment.data.slice(5, attachment.data.indexOf(';')).toLowerCase() !== attachment.mimeType.toLowerCase()) {
+      throw new Error('Unsafe attachment content or mismatched MIME type.');
+    }
+    remainingSyncTime(deadline);
     const blob = dataUrlToBlob(attachment.data, attachment.mimeType);
-    const storagePath = attachment.storagePath || `${session.user.id}/${attachment.noteId}/${attachment.id}`;
-    const { error } = await client.storage.from(ATTACHMENTS_BUCKET).upload(storagePath, blob, {
-      contentType: attachment.mimeType,
-      upsert: true,
-    });
+    if (blob.size > MAX_ATTACHMENT_BYTES) throw new Error('Attachment exceeds the 20 MiB size limit.');
+    if (!attachment.noteId || !attachment.id || [attachment.noteId, attachment.id].some((id) => /[\\/]|^\.\.?$/.test(id))) {
+      throw new Error('Invalid attachment identity.');
+    }
+    const hash = await blobHash(blob);
+    const storagePath = `${session.user.id}/${attachment.noteId}/${attachment.id}/${hash}`;
+    await this.assertSessionStillUser(session.user.id);
+    const bucket = this.storageForSession(session, deadline).from(ATTACHMENTS_BUCKET);
+    const { error } = await bucket.upload(storagePath, blob, { contentType: attachment.mimeType, upsert: false, headers: { Authorization: sessionAuthorization(session) } });
+    await this.assertSessionStillUser(session.user.id);
     if (error) {
-      throw supabaseSyncError(error, 'Could not upload attachment');
+      if (!isStorageObjectAlreadyExists(error)) throw supabaseSyncError(error, 'Could not upload attachment');
+      // A retry may find the immutable blob. Confirm integrity before reusing it.
+      const existing = await bucket.download(storagePath);
+      if (existing.error || !existing.data || await blobHash(existing.data) !== hash) {
+        throw new Error('Existing immutable attachment failed integrity verification.');
+      }
     }
     return { storagePath };
   }
 
-  async downloadAttachment(attachment: ImageAttachment): Promise<{ data: string }> {
-    const client = this.requireClient();
+  async downloadAttachment(attachment: ImageAttachment, expectedUserId?: string): Promise<{ data: string }> {
+    const deadline = Date.now() + 28_000;
+    this.requireClient();
+    if (!isSafeContentMimeType(attachment.mimeType, 'file')) throw new Error('Unsafe attachment MIME type.');
     if (!attachment.storagePath) {
       throw new Error('Attachment storage path is missing.');
     }
-    const { data, error } = await client.storage.from(ATTACHMENTS_BUCKET).download(attachment.storagePath);
+    const session = await this.getSession();
+    if (session && expectedUserId && session.user.id !== expectedUserId) throw new Error('Account changed; the previous request was discarded.');
+    if (!session) throw new Error('Please sign in before downloading attachments.');
+    assertOwnedStoragePath(attachment.storagePath, session.user.id);
+    const { data, error } = await this.storageForSession(session, deadline).from(ATTACHMENTS_BUCKET).download(attachment.storagePath, {}, { signal: AbortSignal.timeout(remainingSyncTime(deadline)) });
+    await this.assertSessionStillUser(session.user.id);
     if (error) {
       throw supabaseSyncError(error, 'Could not download attachment');
     }
     if (!data) {
       throw new Error('Could not download attachment: Storage returned no data.');
     }
+    if (data.size > MAX_ATTACHMENT_BYTES) throw new Error('Downloaded attachment exceeds the 20 MiB size limit.');
+    if (data.type && data.type.toLowerCase() !== attachment.mimeType.toLowerCase() && data.type !== 'application/octet-stream') {
+      throw new Error('Downloaded attachment MIME type does not match its metadata.');
+    }
+    const expectedHash = attachment.storagePath.split('/').at(-1);
+    if (expectedHash && /^[a-f0-9]{64}$/.test(expectedHash) && await blobHash(data) !== expectedHash) {
+      throw new Error('Downloaded attachment failed integrity verification.');
+    }
     return { data: await blobToDataUrl(data, attachment.mimeType) };
+  }
+
+  private async assertSessionStillUser(userId: string): Promise<void> {
+    const session = await this.getSession();
+    if (session?.user.id !== userId) throw new Error('Account changed; the previous request was discarded.');
+  }
+
+  private storageForSession(session: AuthSession, deadline = Date.now() + 28_000): SupabaseClient['storage'] {
+    sessionAuthorization(session);
+    remainingSyncTime(deadline);
+    if (this.storageFactory) return this.storageFactory(session);
+    if (!this.url || !this.publishableKey) throw new Error('Supabase storage is not configured.');
+    // A separate non-persistent client binds every storage operation (including
+    // remove, whose SDK has no per-request headers) to this captured identity.
+    return createClient(this.url, this.publishableKey, {
+      global: { headers: { Authorization: sessionAuthorization(session) }, fetch: (input,options) => fetchWithSyncDeadline(input,options,deadline) },
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    }).storage;
   }
 
   private requireClient(): SupabaseClient {
@@ -393,104 +477,135 @@ export class SupabaseSyncAdapter implements RemoteSyncAdapter {
   }
 }
 
-function folderFromRow(row: RemoteFolderRow): Folder {
-  return {
-    id: row.id,
-    name: row.name,
-    sortOrder: row.sort_order,
-    createdAt: fromIso(row.created_at),
-    updatedAt: fromIso(row.updated_at),
-    deletedAt: row.deleted_at ? fromIso(row.deleted_at) : null,
-    syncStatus: 'synced',
-    lastSyncedAt: Date.now(),
-    version: row.version ?? 1,
-  };
+const fetchWithSyncTimeout: typeof fetch = (input, options = {}) => {
+  const timeout = AbortSignal.timeout(30_000);
+  const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
+  return globalThis.fetch(input, { ...options, signal });
+};
+
+function remainingSyncTime(deadline: number): number {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) throw new Error('Sync request timed out. Retry safely using the same immutable mutation ids.');
+  return remaining;
 }
 
-function noteFromRow(row: RemoteNoteRow): Note {
-  return {
-    id: row.id,
-    folderId: row.folder_id,
-    title: row.title,
-    content: row.content,
-    rawContent: row.raw_content || undefined,
-    tags: row.tags || [],
-    pinned: row.pinned,
-    createdAt: fromIso(row.created_at),
-    updatedAt: fromIso(row.updated_at),
-    deletedAt: row.deleted_at ? fromIso(row.deleted_at) : null,
-    syncStatus: 'synced',
-    lastSyncedAt: Date.now(),
-    version: row.version ?? 1,
-  };
+function fetchWithSyncDeadline(input: Parameters<typeof fetch>[0], options: RequestInit = {}, deadline: number) {
+  const timeout = AbortSignal.timeout(remainingSyncTime(deadline));
+  const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
+  return globalThis.fetch(input, { ...options, signal });
 }
 
-function attachmentFromRow(row: RemoteAttachmentRow): ImageAttachment {
-  return {
-    id: row.id,
-    noteId: row.note_id,
-    data: '',
-    mimeType: row.mime_type,
-    storagePath: row.storage_path,
-    sizeBytes: row.size_bytes ?? undefined,
-    createdAt: fromIso(row.created_at),
-    updatedAt: fromIso(row.updated_at),
-    deletedAt: row.deleted_at ? fromIso(row.deleted_at) : null,
-    syncStatus: 'synced',
-    lastSyncedAt: Date.now(),
-  };
+function rpcWithTimeout<T>(request: PromiseLike<T> & { abortSignal?: (signal: AbortSignal) => PromiseLike<T> }, timeout = 28_000): PromiseLike<T> {
+  return typeof request.abortSignal === 'function' ? request.abortSignal(AbortSignal.timeout(timeout)) : request;
 }
 
-function folderToRow(folder: Folder, userId: string): RemoteFolderRow {
-  return {
-    id: folder.id,
-    user_id: userId,
-    name: folder.name,
-    sort_order: folder.sortOrder,
-    created_at: toIso(folder.createdAt),
-    updated_at: toIso(folder.updatedAt),
-    deleted_at: folder.deletedAt ? toIso(folder.deletedAt) : null,
-    version: folder.version ?? 1,
-  };
+function sessionAuthorization(session: AuthSession): string {
+  if (!session.accessToken) throw new Error('The authenticated sync session has no access token. Sign in again.');
+  return `Bearer ${session.accessToken}`;
 }
 
-function noteToRow(note: Note, userId: string): RemoteNoteRow {
-  return {
-    id: note.id,
-    user_id: userId,
-    folder_id: note.folderId,
-    title: note.title,
-    content: note.content,
-    raw_content: note.rawContent || null,
-    tags: note.tags,
-    pinned: note.pinned,
-    created_at: toIso(note.createdAt),
-    updated_at: toIso(note.updatedAt),
-    deleted_at: note.deletedAt ? toIso(note.deletedAt) : null,
-    version: note.version ?? 1,
-  };
+function rpcForSession(client: SupabaseClient, name: string, args: Record<string, unknown>, session: AuthSession, deadline = Date.now() + 28_000) {
+  const timeout = remainingSyncTime(deadline);
+  return rpcWithTimeout(client.rpc(name, args).setHeader('Authorization', sessionAuthorization(session)), timeout);
 }
 
-function attachmentToRow(attachment: ImageAttachment, userId: string): RemoteAttachmentRow {
+function record(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`Invalid ${label}.`);
+  return value as Record<string, unknown>;
+}
+
+function integer(value: unknown, label: string): number {
+  if (typeof value !== 'number') throw new Error(`Invalid ${label}.`);
+  assertSyncInteger(value, label);
+  return value;
+}
+
+function entityFromWire(value: unknown): SyncEntity {
+  if (value !== 'folder' && value !== 'note' && value !== 'attachment') throw new Error('Invalid remote entity kind.');
+  return value;
+}
+
+function valueFromWire(entity: SyncEntity, value: unknown, revision: number, entityId: string): RemoteEntityValue | null {
+  if (value === null) return null;
+  const document = record(value, 'remote document');
+  if (document.id !== entityId) throw new Error('Remote document identity mismatch.');
+  integer(document.createdAt, 'Remote creation time');
+  integer(document.updatedAt, 'Remote update time');
+  if (document.deletedAt !== undefined && document.deletedAt !== null) integer(document.deletedAt, 'Remote deletion time');
+  if (entity === 'folder' && (typeof document.name !== 'string' || typeof document.sortOrder !== 'number')
+    || entity === 'note' && (typeof document.title !== 'string' || typeof document.content !== 'string'
+      || typeof document.folderId !== 'string' || typeof document.pinned !== 'boolean'
+      || !Array.isArray(document.tags) || document.tags.some((tag) => typeof tag !== 'string'))
+    || entity === 'attachment' && (typeof document.noteId !== 'string' || typeof document.storagePath !== 'string'
+      || typeof document.mimeType !== 'string')) throw new Error('Invalid remote entity document.');
   return {
-    id: attachment.id,
-    user_id: userId,
-    note_id: attachment.noteId,
-    storage_path: attachment.storagePath || '',
-    mime_type: attachment.mimeType,
-    size_bytes: attachment.sizeBytes ?? null,
-    created_at: toIso(attachment.createdAt ?? Date.now()),
-    updated_at: toIso(attachment.updatedAt ?? attachment.createdAt ?? Date.now()),
-    deleted_at: attachment.deletedAt ? toIso(attachment.deletedAt) : null,
-  };
+    ...document,
+    ...(entity === 'attachment' ? { data: '', sizeBytes: document.sizeBytes ?? undefined } : {}),
+    ...(entity === 'note' && document.rawContent === null ? { rawContent: undefined } : {}),
+    syncStatus: 'synced', remoteRevision: revision, version: revision, lastSyncedAt: Date.now(),
+  } as unknown as RemoteEntityValue;
+}
+
+function changeFromWire(value: unknown): RemoteChange {
+  const wire = record(value, 'remote change');
+  const entity = entityFromWire(wire.entity);
+  if (typeof wire.entityId !== 'string' || (wire.operation !== 'upsert' && wire.operation !== 'delete')) {
+    throw new Error('Invalid remote change identity or operation.');
+  }
+  const revision = integer(wire.revision, 'Remote revision');
+  const sequence = integer(wire.sequence, 'Remote sequence');
+  if (!revision || !sequence) throw new Error('Remote change revision and sequence must be positive.');
+  const document = valueFromWire(entity, wire.value, revision, wire.entityId);
+  if ((wire.operation === 'delete') !== (document === null)) throw new Error('Invalid remote tombstone.');
+  return { entity, entityId: wire.entityId, operation: wire.operation, revision, sequence, value: document };
+}
+
+function receiptFromWire(value: unknown): MutationReceipt {
+  const wire = record(value, 'mutation receipt');
+  const entity = entityFromWire(wire.entity);
+  if (typeof wire.entityId !== 'string' || typeof wire.mutationId !== 'string'
+    || (wire.status !== 'applied' && wire.status !== 'conflict') || typeof wire.replayed !== 'boolean') {
+    throw new Error('Invalid mutation receipt identity or status.');
+  }
+  const revision = integer(wire.revision, 'Remote revision');
+  const sequence = integer(wire.sequence, 'Remote sequence');
+  if (wire.status === 'applied' && (!revision || !sequence)) throw new Error('Invalid applied mutation receipt.');
+  return { entity, entityId: wire.entityId, mutationId: wire.mutationId,
+    localRevision: integer(wire.localRevision, 'Local revision'), status: wire.status,
+    revision, sequence, value: valueFromWire(entity, wire.value, revision, wire.entityId), replayed: wire.replayed };
+}
+
+function documentForWire(entity: SyncEntity, value: RemoteEntityValue): Record<string, unknown> {
+  const keys = entity === 'folder' ? ['id','name','sortOrder','createdAt','updatedAt','deletedAt']
+    : entity === 'note' ? ['id','folderId','title','content','rawContent','tags','pinned','createdAt','updatedAt','deletedAt']
+    : ['id','noteId','storagePath','mimeType','sizeBytes','createdAt','updatedAt','deletedAt'];
+  const source = value as unknown as Record<string, unknown>;
+  return Object.fromEntries(keys.filter((key) => source[key] !== undefined).map((key) => [key,source[key]]));
+}
+
+function assertOwnedStoragePath(path: string, userId: string): void {
+  if (!path.startsWith(`${userId}/`) || path.split('/').some((part) => !part || part === '.' || part === '..')
+    || /[\\?#]/.test(path)) throw new Error('Attachment storage path belongs to another account or is invalid.');
+}
+
+async function blobHash(blob: Blob): Promise<string> {
+  const hash = await globalThis.crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
+  return Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function isStorageObjectAlreadyExists(error: unknown): boolean {
+  const code = supabaseErrorCode(error);
+  return code === '409' || code === 'Duplicate' || /already exists/i.test(errorMessage(error));
+}
+
+function protocolError(error: unknown, fallback: string): Error {
+  const message = supabaseSyncError(error, fallback);
+  message.message += ' Apply 202610130001_marknote_sync_v2.sql; unsafe legacy writes are never used as a fallback.';
+  return message;
 }
 
 function toIso(value: number): string {
   return new Date(value || 0).toISOString();
-}
-
-function fromIso(value: string): number {
-  return new Date(value).getTime();
 }
 
 function sessionFromSupabaseSession(session: { access_token?: string; user: { id: string; email?: string } }): AuthSession {
@@ -519,7 +634,7 @@ async function blobToDataUrl(blob: Blob, fallbackMimeType: string): Promise<stri
   for (const byte of bytes) {
     binary += String.fromCharCode(byte);
   }
-  return `data:${blob.type || fallbackMimeType};base64,${btoa(binary)}`;
+  return `data:${fallbackMimeType};base64,${btoa(binary)}`;
 }
 
 async function assertSupabaseProjectReachable(url: string | undefined): Promise<void> {
@@ -576,7 +691,7 @@ async function checkProjectHealth(url: string | undefined): Promise<SyncBackendC
   }
 }
 
-async function checkAttachmentStorage(client: SupabaseClient, userId: string): Promise<SyncBackendCheckItem[]> {
+async function checkAttachmentStorage(client: Pick<SupabaseClient, 'storage'>, userId: string): Promise<SyncBackendCheckItem[]> {
   const bucket = client.storage.from(ATTACHMENTS_BUCKET);
   const { error: listError } = await bucket.list(userId, { limit: 1 });
   if (listError) {
@@ -596,131 +711,19 @@ async function checkAttachmentStorage(client: SupabaseClient, userId: string): P
   ];
 }
 
-async function checkSyncTableWrites(client: SupabaseClient, userId: string): Promise<SyncBackendCheckItem> {
-  const now = new Date().toISOString();
-  const suffix = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const folderId = `marknote-diagnostic-folder-${suffix}`;
-  const noteId = `marknote-diagnostic-note-${suffix}`;
-  const attachmentId = `marknote-diagnostic-attachment-${suffix}`;
-  const storagePath = `${userId}/.marknote-diagnostics/${attachmentId}.txt`;
-  const cleanup = async () => {
-    const attachmentDelete = await client.from(ATTACHMENTS_TABLE).delete().eq('user_id', userId).eq('id', attachmentId);
-    const noteDelete = await client.from(NOTES_TABLE).delete().eq('user_id', userId).eq('id', noteId);
-    const folderDelete = await client.from(FOLDERS_TABLE).delete().eq('user_id', userId).eq('id', folderId);
-    return [
-      { resource: 'Sync table attachment delete', error: attachmentDelete.error },
-      { resource: 'Sync table note delete', error: noteDelete.error },
-      { resource: 'Sync table folder delete', error: folderDelete.error },
-    ];
-  };
-
-  try {
-    const folderInsert = await client.from(FOLDERS_TABLE).insert({
-      id: folderId,
-      user_id: userId,
-      name: 'MarkNote diagnostic folder',
-      sort_order: 0,
-      created_at: now,
-      updated_at: now,
-      version: 1,
-    });
-    if (folderInsert.error) {
-      return syncTableWriteError(folderInsert.error, 'Sync table folder insert');
-    }
-
-    const noteInsert = await client.from(NOTES_TABLE).insert({
-      id: noteId,
-      user_id: userId,
-      folder_id: folderId,
-      title: 'MarkNote diagnostic note',
-      content: '<p>diagnostic</p>',
-      raw_content: 'diagnostic',
-      tags: [],
-      pinned: false,
-      created_at: now,
-      updated_at: now,
-      version: 1,
-    });
-    if (noteInsert.error) {
-      return syncTableWriteError(noteInsert.error, 'Sync table note insert');
-    }
-
-    const attachmentInsert = await client.from(ATTACHMENTS_TABLE).insert({
-      id: attachmentId,
-      user_id: userId,
-      note_id: noteId,
-      storage_path: storagePath,
-      mime_type: 'text/plain',
-      size_bytes: 0,
-      created_at: now,
-      updated_at: now,
-    });
-    if (attachmentInsert.error) {
-      return syncTableWriteError(attachmentInsert.error, 'Sync table attachment insert');
-    }
-
-    const noteUpdate = await client
-      .from(NOTES_TABLE)
-      .update({
-        title: 'MarkNote diagnostic note updated',
-        updated_at: new Date().toISOString(),
-      })
-      .eq('user_id', userId)
-      .eq('id', noteId);
-    if (noteUpdate.error) {
-      return syncTableWriteError(noteUpdate.error, 'Sync table note update');
-    }
-
-    const cleanupResults = await cleanup();
-    const cleanupFailure = cleanupResults.find((result) => result.error);
-    if (cleanupFailure) {
-      return syncTableWriteError(cleanupFailure.error, cleanupFailure.resource);
-    }
-    const leftover = await findDiagnosticRowLeftover(client, userId, [
-      { table: ATTACHMENTS_TABLE, id: attachmentId, resource: 'Sync table attachment delete' },
-      { table: NOTES_TABLE, id: noteId, resource: 'Sync table note delete' },
-      { table: FOLDERS_TABLE, id: folderId, resource: 'Sync table folder delete' },
-    ]);
-    if (leftover) {
-      return checkItem(leftover.resource, 'error', `${leftover.resource} returned success, but the diagnostic row is still visible.`);
-    }
-    return checkItem(
-      SYNC_TABLE_WRITES_CHECK_NAME,
-      'ok',
-      'Sync tables can insert, update, and delete folder, note, and attachment rows for the signed-in user.',
-    );
-  } finally {
-    await cleanup().catch(() => undefined);
+async function checkSyncTableWrites(client: SupabaseClient, session: AuthSession): Promise<SyncBackendCheckItem> {
+  const { data, error } = await rpcForSession(client, 'marknote_sync_check_v2', {}, session);
+  if (error) return checkItem(SYNC_TABLE_WRITES_CHECK_NAME, 'error', protocolError(error, 'Versioned sync readiness check failed').message, supabaseErrorCode(error));
+  const readiness = data as { protocolVersion?: number; capabilities?: unknown } | null;
+  const required = ['cas', 'idempotency', 'sequence', 'tombstones', 'snapshot-paging'];
+  if (readiness?.protocolVersion !== SYNC_PROTOCOL_VERSION || !Array.isArray(readiness.capabilities)
+    || required.some((capability) => !(readiness.capabilities as unknown[]).includes(capability))) {
+    return checkItem(SYNC_TABLE_WRITES_CHECK_NAME, 'error', 'Versioned sync readiness returned an unsupported protocol.');
   }
+  return checkItem(SYNC_TABLE_WRITES_CHECK_NAME, 'ok', 'Versioned sync CAS, replay, and tombstone writes passed inside a rolled back diagnostic transaction.');
 }
 
-async function findDiagnosticRowLeftover(
-  client: SupabaseClient,
-  userId: string,
-  rows: Array<{ table: string; id: string; resource: string }>,
-): Promise<{ resource: string } | null> {
-  for (const row of rows) {
-    const { data, error } = await client
-      .from(row.table)
-      .select('id')
-      .eq('user_id', userId)
-      .eq('id', row.id)
-      .limit(1);
-    if (error) {
-      return { resource: row.resource };
-    }
-    if (Array.isArray(data) && data.length > 0) {
-      return { resource: row.resource };
-    }
-  }
-  return null;
-}
-
-function syncTableWriteError(error: unknown, resource: string): SyncBackendCheckItem {
-  return checkItem(resource, 'error', supabaseBackendErrorMessage(error, resource), supabaseErrorCode(error));
-}
-
-async function checkAttachmentStorageCanary(client: SupabaseClient, userId: string): Promise<SyncBackendCheckItem> {
+async function checkAttachmentStorageCanary(client: Pick<SupabaseClient, 'storage'>, userId: string): Promise<SyncBackendCheckItem> {
   const bucket = client.storage.from(ATTACHMENTS_BUCKET);
   const path = `${userId}/.marknote-diagnostics/storage-canary-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`;
   let shouldCleanup = false;
@@ -833,34 +836,6 @@ function oauthRedirectUrl(configuredRedirectUrl?: string): string | undefined {
   url.search = '';
   url.searchParams.set('app', '1');
   return url.toString();
-}
-
-async function softDeleteRemote(client: SupabaseClient, table: string, id: string, deletedAt: string, userId: string) {
-  return client
-    .from(table)
-    .update({
-      deleted_at: deletedAt,
-      updated_at: deletedAt,
-    })
-    .eq('user_id', userId)
-    .eq('id', id);
-}
-
-async function softDeleteAttachmentRemote(
-  client: SupabaseClient,
-  attachment: string | ImageAttachment,
-  deletedAt: string,
-  userId: string,
-) {
-  const id = typeof attachment === 'string' ? attachment : attachment.id;
-  const storagePath = typeof attachment === 'string' ? '' : attachment.storagePath;
-  if (storagePath) {
-    const { error } = await client.storage.from(ATTACHMENTS_BUCKET).remove([storagePath]);
-    if (error && !isSupabaseStorageObjectMissingError(error)) {
-      return { data: null, error };
-    }
-  }
-  return softDeleteRemote(client, ATTACHMENTS_TABLE, id, deletedAt, userId);
 }
 
 function checkItem(

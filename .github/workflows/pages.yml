@@ -16,14 +16,19 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  NODE_VERSION: '22.12.0'
+  NODE_VERSION: '24.19.0'
   VITE_SYNC_CONFIG_URL: ${{ vars.MARKNOTE_SYNC_CONFIG_URL }}
   MARKNOTE_REQUIRE_SYNC_CONFIG: '1'
   MARKNOTE_SUPABASE_AUTH_REDIRECT_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/?app=1
 
 jobs:
+  quality:
+    name: Shared quality gates
+    uses: ./.github/workflows/quality.yml
+
   build:
     name: Build website
+    needs: quality
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -38,6 +43,9 @@ jobs:
       - name: Configure Pages
         continue-on-error: true
         uses: actions/configure-pages@v6
+
+      - name: Install pinned npm
+        run: npm install --global npm@11.9.0
 
       - name: Install dependencies
         run: npm ci
@@ -82,6 +90,9 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install pinned npm
+        run: npm install --global npm@11.9.0
 
       - name: Verify live Pages deployment
         env:

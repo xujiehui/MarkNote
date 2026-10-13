@@ -20,8 +20,10 @@ import {
   upsertNote,
 } from '../src/lib/db';
 
-const dom = new JSDOM('<!doctype html><html><body></body></html>');
+const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'https://marknote.test/' });
 Object.assign(globalThis, {
+  window: dom.window,
+  document: dom.window.document,
   DOMParser: dom.window.DOMParser,
   HTMLElement: dom.window.HTMLElement,
 });
@@ -241,10 +243,12 @@ async function main() {
 
   await permanentlyDeleteNote(note.id);
   assert.equal(await db.notes.get(note.id), undefined);
-  const attachmentTombstone = await db.images.get(attachment.id);
-  assert.equal(attachmentTombstone?.deletedAt !== null, true);
-  assert.equal(attachmentTombstone?.storagePath, 'user-1/note-1/image-1');
-  assert.ok(await db.syncQueue.where('[entity+entityId]').equals(['attachment', attachment.id]).first());
+  assert.equal(await db.images.get(attachment.id), undefined);
+  const attachmentTombstone = await db.tombstones.get(`attachment:${attachment.id}`);
+  assert.equal(typeof attachmentTombstone?.deletedAt, 'number');
+  const deletion = await db.syncQueue.where('[entity+entityId]').equals(['attachment', attachment.id]).first();
+  assert.ok(deletion);
+  assert.equal(deletion.snapshot && 'storagePath' in deletion.snapshot && deletion.snapshot.storagePath, 'user-1/note-1/image-1');
 
   console.log('db tests passed');
 }

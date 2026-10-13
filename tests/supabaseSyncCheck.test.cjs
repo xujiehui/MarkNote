@@ -33,6 +33,11 @@ globalThis.fetch = async (input, init = {}) => {
   if (url.includes('/auth/v1/health')) {
     return jsonResponse(200, { status: 'ok' });
   }
+  if (url.includes('/rest/v1/rpc/marknote_sync_check_v2')) {
+    if (process.env.MARKNOTE_TEST_RPC_MODE === 'missing') return jsonResponse(404,{code:'PGRST202',message:'Function missing'});
+    if (process.env.MARKNOTE_TEST_RPC_MODE === 'unsupported') return jsonResponse(200,{protocolVersion:1,capabilities:[]});
+    return jsonResponse(200,{protocolVersion:2,capabilities:['cas','idempotency','sequence','tombstones','snapshot-paging']});
+  }
   if (url.includes('/rest/v1/')) {
     if (method === 'GET' && url.includes('id=eq.marknote-diagnostic-')) {
       return jsonResponse(200, []);
@@ -125,6 +130,11 @@ globalThis.fetch = async (input, init = {}) => {
   }
   if (url.includes('/auth/v1/health')) {
     return jsonResponse(200, { status: 'ok' });
+  }
+  if (url.includes('/rest/v1/rpc/marknote_sync_check_v2')) {
+    if (process.env.MARKNOTE_TEST_RPC_MODE === 'missing') return jsonResponse(404,{code:'PGRST202',message:'Function missing'});
+    if (process.env.MARKNOTE_TEST_RPC_MODE === 'unsupported') return jsonResponse(200,{protocolVersion:1,capabilities:[]});
+    return jsonResponse(200,{protocolVersion:2,capabilities:['cas','idempotency','sequence','tombstones','snapshot-paging']});
   }
   if (url.includes('/rest/v1/')) {
     if (method === 'GET' && url.includes('id=eq.marknote-diagnostic-')) {
@@ -292,6 +302,11 @@ globalThis.fetch = async (input) => {
   if (url.includes('/auth/v1/health')) {
     return jsonResponse(200, { status: 'ok' });
   }
+  if (url.includes('/rest/v1/rpc/marknote_sync_check_v2')) {
+    if (process.env.MARKNOTE_TEST_RPC_MODE === 'missing') return jsonResponse(404,{code:'PGRST202',message:'Function missing'});
+    if (process.env.MARKNOTE_TEST_RPC_MODE === 'unsupported') return jsonResponse(200,{protocolVersion:1,capabilities:[]});
+    return jsonResponse(200,{protocolVersion:2,capabilities:['cas','idempotency','sequence','tombstones','snapshot-paging']});
+  }
   if (url.includes('/rest/v1/')) {
     return jsonResponse(404, {
       code: 'PGRST205',
@@ -360,67 +375,13 @@ const envRequireAuthResult = spawnSyncWithBackendConfig(['--require', preloadPat
 assert.notEqual(envRequireAuthResult.status, 0, `${envRequireAuthResult.stdout}\n${envRequireAuthResult.stderr}`);
 assert.match(envRequireAuthResult.stderr, /SUPABASE_ACCESS_TOKEN is missing/);
 
-const failingPreloadPath = join(tempDir, 'failing-preload.cjs');
-writeFileSync(
-  failingPreloadPath,
-  `
-const assert = require('node:assert/strict');
-const cleanupDeletes = [];
-globalThis.fetch = async (input, init = {}) => {
-  const url = String(input);
-  const method = init.method || 'GET';
-  if (url.includes('/auth/v1/health')) {
-    return jsonResponse(200, { status: 'ok' });
-  }
-  if (url.includes('/rest/v1/')) {
-    if (method === 'GET') {
-      return jsonResponse(200, []);
-    }
-    if (method === 'POST' && url.includes('/rest/v1/folders')) {
-      return jsonResponse(201, []);
-    }
-    if (method === 'POST' && url.includes('/rest/v1/notes')) {
-      return jsonResponse(403, { code: '42501', message: 'permission denied for table notes' });
-    }
-    if (method === 'DELETE') {
-      cleanupDeletes.push(url);
-      if (cleanupDeletes.length === 3) {
-        assert.equal(cleanupDeletes.some((value) => value.includes('/rest/v1/folders')), true);
-        process.stderr.write('[cleanup-ok]');
-      }
-      return jsonResponse(204, []);
-    }
-  }
-  if (url.includes('/storage/v1/object/list/attachments')) {
-    return jsonResponse(200, []);
-  }
-  return jsonResponse(500, { message: 'Unexpected URL: ' + url });
-};
-function jsonResponse(status, body) {
-  return {
-    status,
-    async text() {
-      return JSON.stringify(body);
-    },
-  };
-}
-`,
-);
-
-const failingResult = spawnSyncWithBackendConfig(['--require', failingPreloadPath, 'scripts/check-supabase-sync.mjs'], {
-  cwd: process.cwd(),
-  encoding: 'utf8',
-  env: {
-    ...process.env,
-    VITE_SUPABASE_URL: 'https://localhost',
-    VITE_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_test',
-    SUPABASE_ACCESS_TOKEN: token,
-  },
+const missingProtocolResult = spawnSyncWithBackendConfig(['--require', preloadPath, 'scripts/check-supabase-sync.mjs'], {
+  cwd: process.cwd(), encoding: 'utf8', env: { ...process.env, SUPABASE_ACCESS_TOKEN: token, MARKNOTE_TEST_RPC_MODE: 'missing' },
 });
-
-assert.notEqual(failingResult.status, 0, `${failingResult.stdout}\n${failingResult.stderr}`);
-assert.match(failingResult.stderr, /Sync table note insert check failed/);
-assert.match(failingResult.stderr, /\[cleanup-ok\]/);
+assert.notEqual(missingProtocolResult.status,0);
+assert.match(missingProtocolResult.stderr,/Versioned sync protocol check failed/);
+assert.match(missingProtocolResult.stderr,/202610130001_marknote_sync_v2/);
+assert.doesNotMatch(missingProtocolResult.stdout,/Attachment storage canary: ok/);
 
 const invalidTokenPreloadPath = join(tempDir, 'invalid-token-preload.cjs');
 writeFileSync(
@@ -430,6 +391,11 @@ globalThis.fetch = async (input) => {
   const url = String(input);
   if (url.includes('/auth/v1/health')) {
     return jsonResponse(200, { status: 'ok' });
+  }
+  if (url.includes('/rest/v1/rpc/marknote_sync_check_v2')) {
+    if (process.env.MARKNOTE_TEST_RPC_MODE === 'missing') return jsonResponse(404,{code:'PGRST202',message:'Function missing'});
+    if (process.env.MARKNOTE_TEST_RPC_MODE === 'unsupported') return jsonResponse(200,{protocolVersion:1,capabilities:[]});
+    return jsonResponse(200,{protocolVersion:2,capabilities:['cas','idempotency','sequence','tombstones','snapshot-paging']});
   }
   if (url.includes('/rest/v1/')) {
     return jsonResponse(401, { code: 'PGRST301', message: 'JWT expired' });
@@ -463,115 +429,12 @@ assert.match(invalidTokenResult.stderr, /SUPABASE_ACCESS_TOKEN was rejected/);
 assert.match(invalidTokenResult.stderr, /Sign in again/);
 assert.doesNotMatch(invalidTokenResult.stderr, /GRANT \+ RLS policies/);
 
-const deleteFailPreloadPath = join(tempDir, 'delete-fail-preload.cjs');
-writeFileSync(
-  deleteFailPreloadPath,
-  `
-globalThis.fetch = async (input, init = {}) => {
-  const url = String(input);
-  const method = init.method || 'GET';
-  if (url.includes('/auth/v1/health')) {
-    return jsonResponse(200, { status: 'ok' });
-  }
-  if (url.includes('/rest/v1/')) {
-    if (method === 'GET') {
-      return jsonResponse(200, []);
-    }
-    if (method === 'POST' || method === 'PATCH') {
-      return jsonResponse(201, []);
-    }
-    if (method === 'DELETE' && url.includes('/rest/v1/folders')) {
-      return jsonResponse(403, { code: '42501', message: 'permission denied for table folders' });
-    }
-    if (method === 'DELETE') {
-      return jsonResponse(204, []);
-    }
-  }
-  if (url.includes('/storage/v1/object/list/attachments')) {
-    return jsonResponse(200, []);
-  }
-  return jsonResponse(500, { message: 'Unexpected URL: ' + url });
-};
-function jsonResponse(status, body) {
-  return {
-    status,
-    async text() {
-      return JSON.stringify(body);
-    },
-  };
-}
-`,
-);
-
-const deleteFailResult = spawnSyncWithBackendConfig(['--require', deleteFailPreloadPath, 'scripts/check-supabase-sync.mjs'], {
-  cwd: process.cwd(),
-  encoding: 'utf8',
-  env: {
-    ...process.env,
-    VITE_SUPABASE_URL: 'https://localhost',
-    VITE_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_test',
-    SUPABASE_ACCESS_TOKEN: token,
-  },
+const unsupportedProtocolResult = spawnSyncWithBackendConfig(['--require', preloadPath, 'scripts/check-supabase-sync.mjs'], {
+  cwd: process.cwd(), encoding: 'utf8', env: { ...process.env, SUPABASE_ACCESS_TOKEN: token, MARKNOTE_TEST_RPC_MODE: 'unsupported' },
 });
-
-assert.notEqual(deleteFailResult.status, 0, `${deleteFailResult.stdout}\n${deleteFailResult.stderr}`);
-assert.match(deleteFailResult.stderr, /Sync table folder delete check failed/);
-assert.doesNotMatch(deleteFailResult.stdout, /Attachment storage canary: ok/);
-
-const leftoverPreloadPath = join(tempDir, 'leftover-preload.cjs');
-writeFileSync(
-  leftoverPreloadPath,
-  `
-globalThis.fetch = async (input, init = {}) => {
-  const url = String(input);
-  const method = init.method || 'GET';
-  if (url.includes('/auth/v1/health')) {
-    return jsonResponse(200, { status: 'ok' });
-  }
-  if (url.includes('/rest/v1/')) {
-    if (method === 'GET' && url.includes('/rest/v1/notes') && url.includes('id=eq.marknote-diagnostic-note-')) {
-      return jsonResponse(200, [{ id: 'still-here' }]);
-    }
-    if (method === 'GET') {
-      return jsonResponse(200, []);
-    }
-    if (method === 'POST' || method === 'PATCH') {
-      return jsonResponse(201, []);
-    }
-    if (method === 'DELETE') {
-      return jsonResponse(204, []);
-    }
-  }
-  if (url.includes('/storage/v1/object/list/attachments')) {
-    return jsonResponse(200, []);
-  }
-  return jsonResponse(500, { message: 'Unexpected URL: ' + url });
-};
-function jsonResponse(status, body) {
-  return {
-    status,
-    async text() {
-      return JSON.stringify(body);
-    },
-  };
-}
-`,
-);
-
-const leftoverResult = spawnSyncWithBackendConfig(['--require', leftoverPreloadPath, 'scripts/check-supabase-sync.mjs'], {
-  cwd: process.cwd(),
-  encoding: 'utf8',
-  env: {
-    ...process.env,
-    VITE_SUPABASE_URL: 'https://localhost',
-    VITE_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_test',
-    SUPABASE_ACCESS_TOKEN: token,
-  },
-});
-
-assert.notEqual(leftoverResult.status, 0, `${leftoverResult.stdout}\n${leftoverResult.stderr}`);
-assert.match(leftoverResult.stderr, /Sync table note delete returned success, but the diagnostic row is still visible/);
-assert.doesNotMatch(leftoverResult.stdout, /Attachment storage canary: ok/);
+assert.notEqual(unsupportedProtocolResult.status,0);
+assert.match(unsupportedProtocolResult.stderr,/unsupported protocol/);
+assert.doesNotMatch(unsupportedProtocolResult.stdout,/Attachment storage canary: ok/);
 
 const storageLeftoverPreloadPath = join(tempDir, 'storage-leftover-preload.cjs');
 writeFileSync(
@@ -583,6 +446,11 @@ globalThis.fetch = async (input, init = {}) => {
   const method = init.method || 'GET';
   if (url.includes('/auth/v1/health')) {
     return jsonResponse(200, { status: 'ok' });
+  }
+  if (url.includes('/rest/v1/rpc/marknote_sync_check_v2')) {
+    if (process.env.MARKNOTE_TEST_RPC_MODE === 'missing') return jsonResponse(404,{code:'PGRST202',message:'Function missing'});
+    if (process.env.MARKNOTE_TEST_RPC_MODE === 'unsupported') return jsonResponse(200,{protocolVersion:1,capabilities:[]});
+    return jsonResponse(200,{protocolVersion:2,capabilities:['cas','idempotency','sequence','tombstones','snapshot-paging']});
   }
   if (url.includes('/rest/v1/')) {
     if (method === 'GET') {

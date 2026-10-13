@@ -43,7 +43,7 @@ export function EditorSyncStatus({
   });
 
   return (
-    <div className="flex h-6 items-center gap-1.5 text-[13px] text-[#4b5563]" title={syncError || undefined}>
+    <div role="status" aria-live="polite" className="flex h-6 items-center gap-1.5 text-[13px] text-[#4b5563]" title={syncError || undefined}>
       <span
         className={`h-2 w-2 rounded-full ${
           editorStatus.tone === 'error'

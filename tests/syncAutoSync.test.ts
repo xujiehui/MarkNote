@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import {
   AUTO_SYNC_DELAY_MS,
+  AUTO_SYNC_POLL_MS,
+  MAX_AUTO_SYNC_RETRIES,
+  autoSyncRetryDelay,
+  isRetryableSyncError,
   shouldAutoSync,
   shouldRunInitialBackendVerification,
   shouldRetryAfterSuccessfulDiagnosis,
@@ -49,7 +53,7 @@ function main() {
       checkingBackend: false,
       backendVerificationStatus: 'failed',
     }),
-    true,
+    false,
   );
   assert.equal(
     shouldRunInitialBackendVerification({
@@ -59,7 +63,7 @@ function main() {
       checkingBackend: false,
       backendVerificationStatus: 'pending',
     }),
-    true,
+    false,
   );
   assert.equal(
     shouldRunInitialBackendVerification({
@@ -88,6 +92,21 @@ function main() {
   assert.equal(shouldRetryAfterSuccessfulDiagnosis({ ...readyState, backendOk: true, failed: 1 }), true);
   assert.equal(shouldRetryAfterSuccessfulDiagnosis({ ...readyState, backendOk: true, checkingBackend: true }), false);
 
+  assert.equal(AUTO_SYNC_POLL_MS, 30_000);
+  assert.equal(MAX_AUTO_SYNC_RETRIES, 5);
+  assert.equal(shouldAutoSync({ ...readyState, failed: 1, retryAttempt: 1 }), true);
+  assert.equal(shouldAutoSync({ ...readyState, failed: 1, retryAttempt: 6 }), false);
+  assert.equal(shouldAutoSync({ ...readyState, online: false }), false);
+  assert.equal(shouldAutoSync({ ...readyState, failed: 0, retryAttempt: 6 }), false);
+  assert.equal(shouldAutoSync({ ...readyState, pending: 0, failed: 0, retryAttempt: 1 }), true, 'idle failed pull can retry without local outbox');
+  assert.equal(shouldAutoSync({ ...readyState, pending: 0, failed: 0, retryAttempt: 0 }), false);
+  assert.equal(isRetryableSyncError('network down'), true);
+  assert.equal(isRetryableSyncError('JWT expired; sign in again'), false);
+  assert.equal(isRetryableSyncError('Versioned sync protocol is required'), false);
+  assert.equal(isRetryableSyncError('permission denied for table notes'), false);
+  assert.equal(autoSyncRetryDelay(1, 0.5), 1200);
+  assert.equal(autoSyncRetryDelay(3, 0.5), 4800);
+  assert.equal(autoSyncRetryDelay(10, 0.5), 60_000);
   console.log('sync auto-sync tests passed');
 }
 

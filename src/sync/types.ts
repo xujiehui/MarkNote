@@ -1,4 +1,5 @@
 import type { Folder, ImageAttachment, Note, SyncDevice } from '../types';
+import type { MutationReceipt, RemoteChangePage, SyncMutation } from './protocol';
 
 export type SyncProviderId = 'disabled' | 'supabase' | 'custom';
 
@@ -53,11 +54,14 @@ export interface RemoteSyncAdapter {
   signInWithOAuth(provider: OAuthProvider): Promise<void>;
   completeOAuthSignIn(callbackUrl: string): Promise<AuthSession | null>;
   signOut(): Promise<void>;
-  registerDevice(device: SyncDevice): Promise<void>;
+  registerDevice(device: SyncDevice, expectedUserId?: string): Promise<void>;
+  pullChanges?(afterSequence: number, upperBound?: number, expectedUserId?: string): Promise<RemoteChangePage>;
+  pushMutations?(mutations: SyncMutation[], expectedUserId?: string): Promise<MutationReceipt[]>;
   pull(lastPulledAt: number): Promise<RemoteSnapshot>;
   push(payload: PushPayload): Promise<{ syncedAt: number }>;
-  uploadAttachment?(attachment: ImageAttachment): Promise<{ storagePath: string; publicUrl?: string }>;
-  downloadAttachment?(attachment: ImageAttachment): Promise<{ data: string }>;
+  flushAttachmentGarbage?(expectedUserId?: string): Promise<void>;
+  uploadAttachment?(attachment: ImageAttachment, expectedUserId?: string): Promise<{ storagePath: string; publicUrl?: string }>;
+  downloadAttachment?(attachment: ImageAttachment, expectedUserId?: string): Promise<{ data: string }>;
 }
 
 export type SyncBackendCheckStatus = 'ok' | 'warning' | 'error';
@@ -79,6 +83,7 @@ export interface SyncResult {
   ok: boolean;
   pushed: number;
   pulled: number;
+  conflicts?: number;
   syncedAt?: number;
   error?: string;
 }

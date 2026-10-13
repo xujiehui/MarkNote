@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EditorContent, useEditor } from '@tiptap/react';
-import { Mark, Node as TiptapNode, mergeAttributes } from '@tiptap/core';
+import { Node as TiptapNode, mergeAttributes } from '@tiptap/core';
 import { NodeSelection } from '@tiptap/pm/state';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import TaskItem from '@tiptap/extension-task-item';
 import TaskList from '@tiptap/extension-task-list';
+import { TableKit } from '@tiptap/extension-table';
+import { capabilities } from '../lib/capabilities';
+import { sanitizeNoteContent, sanitizeContentUrl } from '../lib/sanitizeContent';
+import { LinkDialog } from './LinkDialog';
+import { db, getWorkspaceEpoch, isWorkspaceCurrent } from '../lib/db';
 import {
   AlignCenter,
   AlignLeft,
@@ -171,6 +176,11 @@ export function EditorPane({
   const [aiOpen, setAiOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const currentNoteRef = useRef(note?.id);
+  currentNoteRef.current = note?.id;
+  useEffect(() => { currentNoteRef.current = note?.id; return () => { currentNoteRef.current = undefined; }; }, [note?.id]);
+  const reportError = useCallback((error: unknown) => { setToast(error instanceof Error ? error.message : t('editor.operationFailed')); }, [t]);
   const [moreOpen, setMoreOpen] = useState(false);
   const [slashOpen, setSlashOpen] = useState(false);
   const [slashQuery, setSlashQuery] = useState('');
@@ -181,6 +191,7 @@ export function EditorPane({
   const extensions = useMemo(
     () => [
       StarterKit.configure({
+        link: { openOnClick: false, isAllowedUri: (url: string) => sanitizeContentUrl(url, 'link') !== null },
         codeBlock: {
           HTMLAttributes: {
             class: 'hljs marknote-code',
@@ -194,7 +205,7 @@ export function EditorPane({
       TaskItem.configure({
         nested: true,
       }),
-      UnderlineMark,
+      TableKit.configure({ table: { resizable: false, HTMLAttributes: { class: 'marknote-table' } } }),
       VideoNode,
       AudioNode,
       FileAttachmentNode,
@@ -208,8 +219,9 @@ export function EditorPane({
 
   const editor = useEditor({
     extensions,
-    content: note?.content || '<p></p>',
+    content: sanitizeNoteContent(note?.content || '<p></p>'),
     editorProps: {
+      transformPastedHTML: sanitizeNoteContent,
       attributes: {
         class: 'prose-editor',
       },
@@ -237,15 +249,22 @@ export function EditorPane({
         return;
       }
 
+      const targetNoteId = note.id; const database = db; const epoch = getWorkspaceEpoch();
       setImageUploadProgress(5);
+      try {
       for (const [index, file] of files.entries()) {
         const src = await fileToBase64Image(file);
+        if (!isWorkspaceCurrent(epoch) || currentNoteRef.current !== targetNoteId) throw new Error(t('editor.noteChanged'));
         const attachment = await createImageAttachment({
           noteId: note.id,
           data: src,
           mimeType: dataUrlMimeType(src),
           sizeBytes: dataUrlSizeBytes(src),
-        });
+        }, { database });
+        if (!isWorkspaceCurrent(epoch) || currentNoteRef.current !== targetNoteId) {
+          await database.images.delete(attachment.id); await database.syncQueue.where('[entity+entityId]').equals(['attachment', attachment.id]).delete();
+          throw new Error(t('editor.noteChanged'));
+        }
         editor
           .chain()
           .focus()
@@ -253,9 +272,9 @@ export function EditorPane({
           .run();
         setImageUploadProgress(Math.round(((index + 1) / files.length) * 100));
       }
-      window.setTimeout(() => setImageUploadProgress(null), 650);
+      } finally { setImageUploadProgress(null); }
     },
-    [editor, note],
+    [editor, note, t],
   );
 
   const updateImageOverlay = useCallback((src: string) => {
@@ -297,13 +316,13 @@ export function EditorPane({
   );
 
   useEffect(() => {
-    if (!editor) {
+    if (!editor || editor.isDestroyed || !editor.schema) {
       return;
     }
 
     const nextContent = note?.content || '<p></p>';
     if (editor.getHTML() !== nextContent) {
-      editor.commands.setContent(nextContent, false);
+      editor.commands.setContent(sanitizeNoteContent(nextContent), { emitUpdate: false });
     }
     setImageBubble(null);
     setImageMenu(null);
@@ -453,26 +472,35 @@ export function EditorPane({
     if (!editor || !note) {
       return;
     }
-    const dataUrl = await readFileAsDataUrl(file);
+    const targetNoteId = note.id; const database = db; const epoch = getWorkspaceEpoch();
+    if (file.size > 20 * 1024 * 1024) throw new Error(t('editor.fileTooLarge'));
+    const rawDataUrl = await readFileAsDataUrl(file);
+    const dataUrl = sanitizeContentUrl(rawDataUrl, kind);
+    if (!dataUrl) throw new Error(t('editor.fileUnsupported'));
+    if (!isWorkspaceCurrent(epoch) || currentNoteRef.current !== targetNoteId) throw new Error(t('editor.noteChanged'));
     const attachment = await createImageAttachment({
       noteId: note.id,
       data: dataUrl,
       mimeType: file.type || dataUrlMimeType(dataUrl),
       sizeBytes: file.size || dataUrlSizeBytes(dataUrl),
-    });
+    }, { database });
+    if (!isWorkspaceCurrent(epoch) || currentNoteRef.current !== targetNoteId) {
+      await database.images.delete(attachment.id); await database.syncQueue.where('[entity+entityId]').equals(['attachment', attachment.id]).delete();
+      throw new Error(t('editor.noteChanged'));
+    }
     const safeName = escapeHtml(file.name);
     const attachmentAttr = ` data-attachment-id="${escapeHtml(attachment.id)}"`;
     if (kind === 'video') {
-      editor.chain().focus().insertContent(`<video controls src="${dataUrl}" title="${safeName}"${attachmentAttr}></video><p></p>`).run();
+      editor.chain().focus().insertContent(`<video controls src="${escapeHtml(dataUrl)}" title="${safeName}"${attachmentAttr}></video><p></p>`).run();
       showToast('视频已插入');
       return;
     }
     if (kind === 'audio') {
-      editor.chain().focus().insertContent(`<audio controls src="${dataUrl}" title="${safeName}"${attachmentAttr}></audio><p></p>`).run();
+      editor.chain().focus().insertContent(`<audio controls src="${escapeHtml(dataUrl)}" title="${safeName}"${attachmentAttr}></audio><p></p>`).run();
       showToast('音频已插入');
       return;
     }
-    editor.chain().focus().insertContent(`<file-attachment href="${dataUrl}" filename="${safeName}"${attachmentAttr}></file-attachment>`).run();
+    editor.chain().focus().insertContent(`<file-attachment href="${escapeHtml(dataUrl)}" filename="${safeName}"${attachmentAttr}></file-attachment>`).run();
     showToast('文件已插入');
   }
 
@@ -514,34 +542,18 @@ export function EditorPane({
   }
 
   async function replaceSelectedImage(file: File) {
-    if (!editor || !file.type.startsWith('image/')) {
-      return;
-    }
+    if (!editor || !note || !file.type.startsWith('image/')) return;
+    const targetNoteId = note.id; const database = db; const epoch = getWorkspaceEpoch();
     setImageUploadProgress(10);
-    const src = await fileToBase64Image(file);
-    const attrs = editor.getAttributes('image') as { attachmentId?: string };
-    let attachmentId = attrs.attachmentId;
-    if (attachmentId) {
-      await updateImageAttachment(attachmentId, {
-        data: src,
-        mimeType: dataUrlMimeType(src),
-        sizeBytes: dataUrlSizeBytes(src),
-      });
-    } else if (note) {
-      const attachment = await createImageAttachment({
-        noteId: note.id,
-        data: src,
-        mimeType: dataUrlMimeType(src),
-        sizeBytes: dataUrlSizeBytes(src),
-      });
-      attachmentId = attachment.id;
-    }
-    editor.chain().focus().updateAttributes('image', { src, alt: file.name, attachmentId }).run();
-    setImageUploadProgress(100);
-    setImageBubble(null);
-    setImageMenu(null);
-    window.setTimeout(() => setImageUploadProgress(null), 650);
-    showToast('图片已替换');
+    try {
+      const src = await fileToBase64Image(file);
+      if (!isWorkspaceCurrent(epoch) || currentNoteRef.current !== targetNoteId) throw new Error(t('editor.noteChanged'));
+      const attachment = await createImageAttachment({ noteId: targetNoteId, data: src, mimeType: dataUrlMimeType(src), sizeBytes: dataUrlSizeBytes(src) }, { database });
+      if (!isWorkspaceCurrent(epoch) || currentNoteRef.current !== targetNoteId) throw new Error(t('editor.noteChanged'));
+      editor.chain().focus().updateAttributes('image', { src, alt: file.name, attachmentId: attachment.id }).run();
+      setImageBubble(null); setImageMenu(null);
+      showToast(t('editor.imageReplaced'));
+    } finally { setImageUploadProgress(null); }
   }
 
   function previewSelectedImage() {
@@ -579,6 +591,7 @@ export function EditorPane({
   }
 
   function runAiAction(action: string) {
+    if (!capabilities.ai) return;
     if (!editor || !note) {
       return;
     }
@@ -604,6 +617,7 @@ export function EditorPane({
   }
 
   async function copyShareLink(type: string) {
+    if (!capabilities.sharing) return;
     if (!note) {
       return;
     }
@@ -620,7 +634,7 @@ export function EditorPane({
       imageBubble?.attachmentId ||
       imageMenu?.attachmentId;
     if (attachmentId) {
-      void updateImageAttachment(attachmentId, { deletedAt: Date.now() });
+      void updateImageAttachment(attachmentId, { deletedAt: Date.now() }, { database: db }).catch(reportError);
     }
     editor?.chain().focus().deleteSelection().run();
     setImageBubble(null);
@@ -740,10 +754,10 @@ export function EditorPane({
           </div>
 
           <div className="flex shrink-0 items-center gap-3 text-[#111827]">
-            <TopIconButton label="撤销" onClick={() => editor?.chain().focus().undo().run()}>
+            <TopIconButton label={t('editor.undo')} onClick={() => editor?.chain().focus().undo().run()}>
               <Undo2 size={18} />
             </TopIconButton>
-            <TopIconButton label="重做" onClick={() => editor?.chain().focus().redo().run()}>
+            <TopIconButton label={t('editor.redo')} onClick={() => editor?.chain().focus().redo().run()}>
               <Redo2 size={18} />
             </TopIconButton>
             <div className="relative">
@@ -790,7 +804,7 @@ export function EditorPane({
                                   <button
                                     type="button"
                                     onClick={() => {
-                                      void navigator.clipboard.writeText(snapshot.content);
+                                      void navigator.clipboard.writeText(snapshot.content).catch(reportError);
                                       showToast('版本内容已复制');
                                     }}
                                     className="h-7 rounded border border-[#e5e7eb] bg-white text-[#4b5563] hover:bg-[#f3f4f6]"
@@ -808,10 +822,10 @@ export function EditorPane({
                 </div>
               ) : null}
             </div>
-            <TopIconButton label="收藏" active={note.pinned} onClick={onTogglePin}>
+            <TopIconButton label={t('editor.pin')} active={note.pinned} onClick={onTogglePin}>
               <Star size={19} className={note.pinned ? 'fill-[#2f7df6] text-[#2f7df6]' : ''} />
             </TopIconButton>
-            <div className="relative">
+            <div className="relative" hidden={!capabilities.sharing}>
               <button
                 type="button"
                 onClick={() => {
@@ -877,26 +891,26 @@ export function EditorPane({
                   setAiOpen(false);
                 }}
                 className="grid h-9 w-9 place-items-center rounded-lg text-[#111827] hover:bg-[#f3f4f6]"
-                title="更多"
-                aria-label="更多"
+                title={t('editor.more')}
+                aria-label={t('editor.more')}
               >
                 <Ellipsis size={20} />
               </button>
               {moreOpen ? (
                 <div className="absolute right-0 top-11 z-40 w-44 overflow-hidden rounded-xl border border-[#e5e7eb] bg-white py-1 text-sm shadow-[0_18px_45px_rgba(15,23,42,0.16)]">
                   <MenuAction label={t('editor.save')} onClick={onManualSave} />
-                  <MenuAction label="复制标题" onClick={() => void navigator.clipboard.writeText(note.title)} />
+                  <MenuAction label="复制标题" onClick={() => void navigator.clipboard.writeText(note.title).catch(reportError)} />
                   <MenuAction label="删除笔记" danger onClick={onDeleteNote} />
                 </div>
               ) : null}
             </div>
             <div className="h-8 w-px bg-[#e5e7eb]" />
-            <TopIconButton label="布局" active={wideLayout} onClick={() => {
+            <TopIconButton label={t('editor.layout')} active={wideLayout} onClick={() => {
               setWideLayout((value) => !value);
             }}>
               <Columns2 size={19} />
             </TopIconButton>
-            <div className="relative">
+            <div className="relative" hidden={!capabilities.ai}>
               <button
                 type="button"
                 onClick={() => {
@@ -956,7 +970,7 @@ export function EditorPane({
           })}
         </div>
 
-        <div className="mt-4 inline-flex max-w-full items-center overflow-hidden rounded-lg border border-[#e5e7eb] bg-white px-2 py-2 shadow-[0_10px_30px_rgba(15,23,42,0.08)]">
+        <div className="editor-formatting-toolbar mt-4 inline-flex max-w-full items-center overflow-x-auto rounded-lg border border-[#e5e7eb] bg-white px-2 py-2 shadow-[0_10px_30px_rgba(15,23,42,0.08)]">
           <ToolbarGroup label={t('editor.textStyle')}>
             <IconButton icon={Bold} label={t('editor.bold')} active={editor?.isActive('bold')} onClick={() => editor?.chain().focus().toggleBold().run()} />
             <IconButton icon={Italic} label={t('editor.italic')} active={editor?.isActive('italic')} onClick={() => editor?.chain().focus().toggleItalic().run()} />
@@ -975,16 +989,16 @@ export function EditorPane({
             <IconButton icon={CheckSquare} label={t('editor.checklist')} onClick={() => insertParagraphBlock(TASK_LIST_TEMPLATE)} />
             <IconButton icon={Quote} label={t('editor.quote')} active={editor?.isActive('blockquote')} onClick={() => editor?.chain().focus().toggleBlockquote().run()} />
             <IconButton icon={MinusIcon} label={t('editor.divider')} onClick={() => insertParagraphBlock('<hr><p></p>')} />
-            <IconButton icon={Link} label="链接" onClick={() => insertParagraphBlock('<p><a href="#">链接</a></p>')} />
+            <IconButton icon={Link} label={t('editor.link')} active={editor?.isActive('link')} onClick={() => setLinkOpen(true)} />
           </ToolbarGroup>
           <ToolbarGroup label={t('editor.mediaBlocks')}>
             <IconButton icon={ImagePlus} label={t('editor.insertImage')} onClick={() => fileInputRef.current?.click()} />
             <IconButton icon={VideoIcon} label={t('editor.video')} onClick={() => videoInputRef.current?.click()} />
             <IconButton icon={AudioIcon} label={t('editor.audio')} onClick={() => audioInputRef.current?.click()} />
             <IconButton icon={FileIcon} label={t('editor.file')} onClick={() => attachmentInputRef.current?.click()} />
-            <IconButton icon={Table2} label={t('editor.table')} onClick={() => insertParagraphBlock('<p>| Key | Value |</p><p>| --- | --- |</p>')} />
+            <IconButton icon={Table2} label={t('editor.table')} onClick={() => editor?.chain().focus().insertTable({ rows: 3, cols: 2, withHeaderRow: true }).run()} />
           </ToolbarGroup>
-          <ToolbarGroup label={t('editor.dataBlocks')}>
+          <ToolbarGroup label={t('editor.dataBlocks')} hidden={!capabilities.math && !capabilities.mermaid}>
             <IconButton icon={Sigma} label={t('editor.math')} onClick={() => insertParagraphBlock('<p>$$ E = mc^2 $$</p>')} />
             <IconButton icon={Code2} label={t('editor.mermaid')} onClick={() => insertParagraphBlock('<pre><code class="language-mermaid">graph TD\\nA-->B</code></pre>')} />
           </ToolbarGroup>
@@ -1036,6 +1050,11 @@ export function EditorPane({
         </div>
       </header>
 
+      {linkOpen ? <LinkDialog initialUrl={String(editor?.getAttributes('link').href || '')} onApply={(url) => {
+        if (!url) editor?.chain().focus().extendMarkRange('link').unsetLink().run();
+        else if (editor?.state.selection.empty && !editor.isActive('link')) editor?.chain().focus().insertContent({ type: 'text', text: url, marks: [{ type: 'link', attrs: { href: url } }] }).run();
+        else editor?.chain().focus().extendMarkRange('link').setLink({ href: url }).run();
+      }} onClose={() => setLinkOpen(false)} /> : null}
       <section
         ref={editorShellRef}
         className={`relative min-h-0 overflow-y-auto bg-white pb-20 pl-14 pr-10 pt-7 transition ${wideLayout ? 'marknote-wide-editor' : ''} ${
@@ -1063,14 +1082,14 @@ export function EditorPane({
           if (files.length > 0) {
             event.preventDefault();
             setIsImageDragOver(false);
-            void insertImageFiles(files);
+            void insertImageFiles(files).catch(reportError);
           }
         }}
         onPaste={(event) => {
           const files = Array.from(event.clipboardData.files || []).filter((file) => file.type.startsWith('image/'));
           if (files.length > 0) {
             event.preventDefault();
-            void insertImageFiles(files);
+            void insertImageFiles(files).catch(reportError);
           }
         }}
         onKeyDown={(event) => {
@@ -1120,7 +1139,7 @@ export function EditorPane({
               type="button"
               aria-label={t('editor.copyCode')}
               title={t('editor.copyCode')}
-              onClick={() => void copyCodeText(codeCopyOverlay.text)}
+              onClick={() => void copyCodeText(codeCopyOverlay.text).catch(reportError)}
               className="grid h-6 w-6 place-items-center rounded hover:bg-white/20"
             >
               <Copy size={13} />
@@ -1160,8 +1179,8 @@ export function EditorPane({
             >
               100%
             </button>
-            <IconButton icon={Copy} label={t('editor.copyImage')} onClick={() => void copySelectedImage()} />
-            <IconButton icon={Download} label="下载图片" onClick={() => void downloadSelectedImage()} />
+            <IconButton icon={Copy} label={t('editor.copyImage')} onClick={() => void copySelectedImage().catch(reportError)} />
+            <IconButton icon={Download} label="下载图片" onClick={() => void downloadSelectedImage().catch(reportError)} />
             <IconButton icon={Trash2} label={t('editor.deleteImage')} onClick={deleteSelectedImage} />
           </div>
         ) : null}
@@ -1213,11 +1232,11 @@ export function EditorPane({
               <RefreshCw size={15} />
               替换
             </button>
-            <button type="button" onClick={() => void downloadSelectedImage()} className="flex h-9 w-full items-center gap-2 px-3 text-left text-gray-700 hover:bg-gray-50">
+            <button type="button" onClick={() => void downloadSelectedImage().catch(reportError)} className="flex h-9 w-full items-center gap-2 px-3 text-left text-gray-700 hover:bg-gray-50">
               <Download size={15} />
               下载
             </button>
-            <button type="button" onClick={() => void copySelectedImage()} className="flex h-9 w-full items-center gap-2 px-3 text-left text-gray-700 hover:bg-gray-50">
+            <button type="button" onClick={() => void copySelectedImage().catch(reportError)} className="flex h-9 w-full items-center gap-2 px-3 text-left text-gray-700 hover:bg-gray-50">
               <Copy size={15} />
               {t('editor.copyImage')}
             </button>
@@ -1234,7 +1253,7 @@ export function EditorPane({
           className="hidden"
           onChange={(event) => {
             if (event.target.files) {
-              void insertImageFiles(Array.from(event.target.files));
+              void insertImageFiles(Array.from(event.target.files)).catch(reportError);
               event.target.value = '';
             }
           }}
@@ -1247,7 +1266,7 @@ export function EditorPane({
           onChange={(event) => {
             const file = event.target.files?.[0];
             if (file) {
-              void insertMediaFile(file, 'video');
+              void insertMediaFile(file, 'video').catch(reportError);
               event.target.value = '';
             }
           }}
@@ -1260,7 +1279,7 @@ export function EditorPane({
           onChange={(event) => {
             const file = event.target.files?.[0];
             if (file) {
-              void insertMediaFile(file, 'audio');
+              void insertMediaFile(file, 'audio').catch(reportError);
               event.target.value = '';
             }
           }}
@@ -1272,7 +1291,7 @@ export function EditorPane({
           onChange={(event) => {
             const file = event.target.files?.[0];
             if (file) {
-              void insertMediaFile(file, 'file');
+              void insertMediaFile(file, 'file').catch(reportError);
               event.target.value = '';
             }
           }}
@@ -1285,7 +1304,7 @@ export function EditorPane({
           onChange={(event) => {
             const file = event.target.files?.[0];
             if (file) {
-              void replaceSelectedImage(file);
+              void replaceSelectedImage(file).catch(reportError);
               event.target.value = '';
             }
           }}
@@ -1330,9 +1349,10 @@ function cssEscape(value: string): string {
   return value.replace(/"/g, '\\"');
 }
 
-function ToolbarGroup({ label, children }: { label: string; children: React.ReactNode }) {
+function ToolbarGroup({ label, children, hidden }: { label: string; children: React.ReactNode; hidden?: boolean }) {
+  if (hidden) return null;
   return (
-    <div className="flex min-h-8 items-center gap-1 border-r border-[#e5e7eb] px-1 last:border-r-0" aria-label={label}>
+    <div hidden={hidden} className="flex min-h-8 items-center gap-1 border-r border-[#e5e7eb] px-1 last:border-r-0" aria-label={label}>
       {children}
     </div>
   );
@@ -1544,17 +1564,4 @@ const FileAttachmentNode = TiptapNode.create({
     const filename = HTMLAttributes.filename || HTMLAttributes.download || '下载文件';
     return ['a', mergeAttributes(HTMLAttributes, { download: filename, href: HTMLAttributes.href, class: 'marknote-file-attachment' }), filename];
   },
-});
-
-const UnderlineMark = Mark.create({
-  name: 'underline',
-
-  parseHTML() {
-    return [{ tag: 'u' }, { style: 'text-decoration-line=underline' }, { style: 'text-decoration=underline' }];
-  },
-
-  renderHTML({ HTMLAttributes }) {
-    return ['u', mergeAttributes(HTMLAttributes), 0];
-  },
-
 });

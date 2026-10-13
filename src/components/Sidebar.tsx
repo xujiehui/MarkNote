@@ -83,7 +83,6 @@ export function Sidebar({
   searchResults,
   onQueryChange,
   onFilterChange,
-  onWorkspaceChange,
   onSearchNoteSelect,
   onSearchTagSelect,
   onSearchCodeSelect,
@@ -110,9 +109,8 @@ export function Sidebar({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [notice, setNotice] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
-  const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [syncPanelOpen, setSyncPanelOpen] = useState(false);
-  const [workspaces, setWorkspaces] = useState<string[]>(() => readWorkspaceOptions(workspaceName));
+  const shortcutModifier = navigator.platform.toLowerCase().includes('mac') ? '⌘' : 'Ctrl';
   const tagItems = showAllTags ? tags : tags.slice(0, 5);
   const moreTags = Math.max(0, tags.length - 5);
   const customFolders = folders.filter((folder) => ![DEFAULT_FOLDER_ID, CODE_FOLDER_ID, ARCHIVE_FOLDER_ID].includes(folder.id));
@@ -148,13 +146,17 @@ export function Sidebar({
   useEffect(() => {
     function closeFloatingMenus() {
       setSearchOpen(false);
-      setWorkspaceOpen(false);
       setSettingsOpen(false);
       setSyncPanelOpen(false);
     }
 
     window.addEventListener('click', closeFloatingMenus);
-    return () => window.removeEventListener('click', closeFloatingMenus);
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') closeFloatingMenus(); };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      window.removeEventListener('click', closeFloatingMenus);
+      window.removeEventListener('keydown', closeOnEscape);
+    };
   }, []);
   const primaryNavItems = [
     {
@@ -203,31 +205,8 @@ export function Sidebar({
     window.setTimeout(() => setNotice(''), 1400);
   }
 
-  function changeWorkspace(name: string) {
-    setWorkspaces((current) => {
-      const next = mergeWorkspaces(current, name);
-      writeWorkspaceOptions(next);
-      return next;
-    });
-    onWorkspaceChange(name);
-    setWorkspaceOpen(false);
-  }
-
-  function createWorkspace() {
-    const name = window.prompt(t('sidebar.workspaceCreatePrompt'), t('sidebar.workspaceNewName'))?.trim();
-    if (!name) {
-      return;
-    }
-    setWorkspaces((current) => {
-      const next = current.includes(name) ? current : [...current, name];
-      writeWorkspaceOptions(next);
-      return next;
-    });
-    changeWorkspace(name);
-  }
-
   return (
-    <aside className={`relative grid h-full shrink-0 grid-rows-[auto_1fr_auto] border-r border-[#e5e7eb] bg-[#f5f6f8] transition-[width] duration-300 ${collapsed ? 'w-[76px]' : 'w-[270px]'}`}>
+    <aside className={`workspace-sidebar relative grid h-full min-h-0 shrink-0 grid-rows-[auto_minmax(0,1fr)_auto] border-r border-[#e5e7eb] bg-[#f5f6f8] transition-[width] duration-300 ${collapsed ? 'w-[76px]' : 'w-[270px]'}`} aria-label={t('sidebar.quickAccess')}>
       {collapsed ? (
         <button
           type="button"
@@ -241,12 +220,6 @@ export function Sidebar({
         </button>
       ) : null}
       <div className="min-w-0 px-5 pt-4">
-        <div className="marknote-fake-traffic-lights mb-3 flex h-4 items-center gap-2">
-          <span className="h-3.5 w-3.5 rounded-full bg-[#ff5f57] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)]" />
-          <span className="h-3.5 w-3.5 rounded-full bg-[#ffbd2e] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)]" />
-          <span className="h-3.5 w-3.5 rounded-full bg-[#28c840] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)]" />
-        </div>
-
         <div className="relative mb-5 flex min-w-0 items-center gap-3">
           <button
             type="button"
@@ -260,50 +233,9 @@ export function Sidebar({
           <div className={`min-w-0 flex-1 ${collapsed ? 'hidden' : ''}`}>
             <div className="flex items-center gap-2">
               <h1 className="truncate text-[19px] font-semibold leading-tight text-[#151a23]">MarkNote</h1>
-              <span className="rounded-md bg-[#dce9ff] px-1.5 py-0.5 text-[11px] font-semibold text-[#2f7df6]">Pro</span>
             </div>
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                setWorkspaceOpen((value) => !value);
-                setSearchOpen(false);
-                setSyncPanelOpen(false);
-              }}
-              className="mt-1 flex max-w-full items-center gap-1 truncate rounded-md text-left text-[13px] text-[#6b7280] outline-none transition hover:text-[#111827] focus-visible:ring-2 focus-visible:ring-[#2f7df6]/20"
-              aria-haspopup="menu"
-              aria-expanded={workspaceOpen}
-            >
-              <span className="truncate">{workspaceName}</span>
-              <ChevronDown size={13} />
-            </button>
+            <p className="mt-1 truncate text-[13px] text-[#6b7280]" title={workspaceName}>{workspaceName}</p>
           </div>
-          {workspaceOpen && !collapsed ? (
-            <div
-              className="absolute left-0 top-14 z-40 w-full overflow-hidden rounded-xl border border-[#e5e7eb] bg-white p-1 text-sm shadow-[0_18px_45px_rgba(15,23,42,0.16)]"
-              onMouseDown={(event) => event.preventDefault()}
-              role="menu"
-            >
-              {workspaces.map((workspace) => (
-                <button
-                  key={workspace}
-                  type="button"
-                  onClick={() => changeWorkspace(workspace)}
-                  className={`flex h-9 w-full items-center justify-between rounded-lg px-3 text-left ${
-                    workspace === workspaceName ? 'bg-[#eaf2ff] font-semibold text-[#2563eb]' : 'text-[#374151] hover:bg-[#f3f4f6]'
-                  }`}
-                  role="menuitem"
-                >
-                  <span className="truncate">{workspace}</span>
-                  {workspace === workspaceName ? <span className="text-xs">✓</span> : null}
-                </button>
-              ))}
-              <button type="button" onClick={createWorkspace} className="mt-1 flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-[#374151] hover:bg-[#f3f4f6]" role="menuitem">
-                <Plus size={15} />
-                {t('sidebar.workspaceCreate')}
-              </button>
-            </div>
-          ) : null}
         </div>
 
         <div className={`relative ${collapsed ? 'hidden' : ''}`}>
@@ -319,7 +251,6 @@ export function Sidebar({
             onClick={() => setSearchOpen(true)}
             onFocus={() => {
               setSearchOpen(true);
-              setWorkspaceOpen(false);
               setSyncPanelOpen(false);
             }}
             onKeyDown={(event) => {
@@ -330,9 +261,10 @@ export function Sidebar({
             }}
             className="h-11 w-full rounded-lg border border-transparent bg-[#eaedf2] pl-11 pr-14 text-[14px] text-[#111827] outline-none transition placeholder:text-[#6b7280] focus:border-[#2f7df6]/30 focus:bg-white focus:ring-4 focus:ring-[#2f7df6]/10"
             placeholder={t('sidebar.searchPlaceholder')}
+            aria-label={t('sidebar.searchPlaceholder')}
           />
           <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[12px] text-[#6b7280]">
-            ⌘K
+            {shortcutModifier} K
           </span>
           {showSearchPanel ? (
             <SearchResultsPanel
@@ -356,12 +288,12 @@ export function Sidebar({
         </div>
       </div>
 
-      <div className={`min-w-0 overflow-x-hidden overflow-y-auto px-5 py-5 ${collapsed ? 'px-3' : ''}`}>
-        <div className="mb-6 space-y-1">
+      <div className={`min-h-0 min-w-0 overflow-x-hidden overflow-y-auto px-5 py-5 ${collapsed ? 'px-3' : ''}`}>
+        <nav className="mb-6 space-y-1" aria-label={t('sidebar.quickAccess')}>
           {primaryNavItems.map((item) => (
             <SidebarNavButton key={item.id} active={item.active} icon={item.icon} label={item.label} count={item.count} collapsed={collapsed} onClick={item.onClick} />
           ))}
-        </div>
+        </nav>
 
         <div className="mb-3 h-px bg-[#e2e5ea]" />
 
@@ -497,16 +429,15 @@ export function Sidebar({
             </div>
           ) : null}
           <div className="mb-3 flex items-center gap-3">
-            <div className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-full bg-[radial-gradient(circle_at_50%_28%,#ffd8ad_0_24%,transparent_25%),radial-gradient(circle_at_40%_34%,#111827_0_4%,transparent_5%),radial-gradient(circle_at_60%_34%,#111827_0_4%,transparent_5%),linear-gradient(180deg,#e9f4ff_0_55%,#57a5ff_56%_100%)] text-sm font-semibold text-white shadow-inner">
-              <span className="mt-5 h-5 w-8 rounded-t-full bg-[#1f2937]" aria-hidden="true" />
+            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#eaf2ff] text-sm font-semibold text-[#2563eb]" aria-hidden="true">
+              {(sync.session?.user.email || 'M').slice(0, 1).toUpperCase()}
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <p className="truncate text-[16px] font-semibold text-[#111827]">{sync.session?.user.email || t('sync.localWorkspace')}</p>
-                <span className="rounded-md bg-[#dce9ff] px-1.5 py-0.5 text-[11px] font-semibold text-[#2f7df6]">Pro</span>
               </div>
               <p className={`mt-1 flex items-center gap-1 text-[13px] ${syncClassName}`}>
-                <span className="grid h-4 w-4 place-items-center rounded-full border border-current text-[10px]">✓</span>
+                <Cloud size={13} aria-hidden="true" />
                 {syncLabel}
               </p>
             </div>
@@ -533,7 +464,7 @@ export function Sidebar({
             <span>{storageUsedLabel}</span>
           </div>
           <div className="h-2 overflow-hidden rounded-full bg-[#e5e7eb]">
-            <div className="h-full rounded-full bg-[#2f7df6]" style={{ width: `${storagePercent}%` }} />
+            <div className="h-full rounded-full bg-[#2f7df6]" style={{ width: `${Math.min(100, Math.max(0, storagePercent))}%` }} />
           </div>
         </div>
         <div
@@ -623,6 +554,9 @@ function SidebarNavButton({ active, icon: Icon, label, count, collapsed, onClick
           ? 'border-l-2 border-[#2f7df6] bg-[#eaf2ff] text-[#2f7df6] shadow-[0_1px_2px_rgba(15,23,42,0.04)]'
           : 'text-[#374151] hover:bg-white/70'
       }`}
+      aria-label={label}
+      aria-current={active ? 'page' : undefined}
+      title={collapsed ? label : undefined}
     >
       <Icon size={15} />
       <span className={`min-w-0 flex-1 truncate ${collapsed ? 'hidden' : ''}`}>{label}</span>
@@ -736,23 +670,4 @@ function SearchNoteButton({ title, preview, onClick }: { title: string; preview:
       <div className="mt-1 line-clamp-2 text-xs leading-5 text-[#6b7280]">{preview}</div>
     </button>
   );
-}
-
-function readWorkspaceOptions(activeWorkspace: string) {
-  try {
-    const raw = window.localStorage.getItem('marknote-workspace-options');
-    const parsed = raw ? (JSON.parse(raw) as string[]) : [];
-    return mergeWorkspaces(parsed, activeWorkspace);
-  } catch {
-    return mergeWorkspaces([], activeWorkspace);
-  }
-}
-
-function writeWorkspaceOptions(workspaces: string[]) {
-  window.localStorage.setItem('marknote-workspace-options', JSON.stringify(workspaces));
-}
-
-function mergeWorkspaces(workspaces: string[], activeWorkspace: string) {
-  const defaults = ['Workspace Pro', 'Personal Space'];
-  return Array.from(new Set([...defaults, activeWorkspace, ...workspaces].filter(Boolean)));
 }
