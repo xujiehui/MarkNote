@@ -6,8 +6,9 @@ const { tmpdir } = require('node:os');
 
 const tempDir = mkdtempSync(join(tmpdir(),'marknote-sync-apply-'));
 const preloadPath = join(tempDir,'management-preload.cjs');
-const gates = ['tables','authenticated grants','rls','legacy writes disabled','internal tables private','versioned RPC security',
-  'public policies','attachments bucket','storage rls','storage grants','storage policies'];
+const gates = ['tables','authenticated grants','rls','legacy writes disabled','internal tables private','quota tables private',
+  'versioned RPC security','quota policy helper','public policies','attachments bucket','storage rls','storage grants',
+  'storage immutable','storage policies'];
 writeFileSync(preloadPath,`
 const assert=require('node:assert/strict');
 let applied=false;
@@ -15,15 +16,16 @@ globalThis.fetch=async(input,init={})=>{
   const url=String(input);
   assert.equal(init.headers.authorization,'Bearer dummy-management-token');
   assert.ok(init.signal instanceof AbortSignal,'management requests must have a timeout');
-  if(url.endsWith('/database/migrations') && init.method==='GET') return response(200,[{version:'202610130001',name:'marknote_sync_v2'}]);
+  if(url.endsWith('/database/migrations') && init.method==='GET') return response(200,[{version:'20261015114235',name:'user_storage_quota'}]);
   if(url.endsWith('/database/migrations') && init.method==='POST') {
     const body=JSON.parse(init.body);
-    assert.equal(body.name,'marknote_sync_v2');
+    assert.equal(body.name,'user_storage_quota');
     assert.match(body.query,/^begin;/);
     assert.match(body.query,/commit;$/);
     assert.match(body.query,/create table if not exists public.notes/);
     assert.match(body.query,/marknote_sync_push_v2/);
     assert.match(body.query,/revoke insert, update, delete on public.folders/);
+    assert.match(body.query,/marknote_sync_reserve_storage_v2/);
     assert.doesNotMatch(body.query,/dummy-management-token/);
     if(process.env.MARKNOTE_TEST_APPLY_MODE==='post-failure') return response(403,{message:'Forbidden'});
     applied=true; process.stdout.write('[apply-ok]'); return response(201,{id:'test-migration'});
@@ -49,7 +51,7 @@ function run(args=[],mode='ready',extra={}) {
 }
 const ready=run();
 assert.equal(ready.status,0,ready.stderr);
-assert.match(ready.stdout,/Migration history: found 202610130001/);
+assert.match(ready.stdout,/Migration history: found 20261015114235/);
 assert.match(ready.stdout,/Sync schema already appears ready/);
 assert.match(ready.stdout,/verify:release:online:manual/);
 assert.doesNotMatch(ready.stdout,/dummy-management-token/);
@@ -76,4 +78,4 @@ assert.match(malformed.stderr,/schema readiness check is still incomplete/);
 const noToken=run([], 'ready',{SUPABASE_MANAGEMENT_TOKEN:''});
 assert.equal(noToken.status,1);
 assert.match(noToken.stderr,/SUPABASE_MANAGEMENT_TOKEN is missing/);
-console.log('Supabase migration apply tests passed (v2 gates, dry run, atomic apply, blocked credentials).');
+console.log('Supabase migration apply tests passed (quota gates, dry run, atomic apply, blocked credentials).');

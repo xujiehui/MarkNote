@@ -15,11 +15,16 @@ async function main() {
       create function auth.uid() returns uuid language sql stable as $$
         select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
       create schema storage;
-      create table storage.buckets(id text primary key,name text,public boolean);
-      create table storage.objects(id uuid primary key default gen_random_uuid(),bucket_id text,name text);
+      create table storage.buckets(
+        id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]
+      );
+      create table storage.objects(
+        id uuid primary key default gen_random_uuid(),bucket_id text,name text,metadata jsonb not null default '{}'::jsonb
+      );
       alter table storage.objects enable row level security;
       create function storage.foldername(text) returns text[] language sql immutable as $$ select string_to_array($1,'/') $$;
       grant usage on schema auth to authenticated,anon;
+      grant usage on schema storage to authenticated;
       grant execute on function auth.uid() to authenticated,anon;
     `);
     await db.exec(readFileSync('supabase/migrations/202606190001_marknote_sync_schema.sql','utf8'));
@@ -32,7 +37,10 @@ async function main() {
     const beforeGate = (await db.query(readinessCheckSql)).rows;
     assert.equal(beforeGate.find(row => row.check_name === 'legacy writes disabled').ok,false);
     assert.equal(beforeGate.find(row => row.check_name === 'versioned RPC security').ok,false);
-    const migration = readFileSync('supabase/migrations/202610130001_marknote_sync_v2.sql','utf8');
+    const migration = [
+      readFileSync('supabase/migrations/202610130001_marknote_sync_v2.sql','utf8'),
+      readFileSync('supabase/migrations/20261015114235_user_storage_quota.sql','utf8'),
+    ].join('\n');
     await db.exec(migration);
     const readyRows = (await db.query(readinessCheckSql)).rows;
     assert.equal(readyRows.length,REQUIRED_READINESS_CHECKS.length);
@@ -59,10 +67,76 @@ async function main() {
     assert.equal((await pull()).upperBound,2);
     const checked = await call('select public.marknote_sync_check_v2() as result');
     assert.equal(checked.protocolVersion,2);
+    assert.ok(checked.capabilities.includes('storage-quota'));
     assert.equal((await pull()).upperBound,2,'readiness canary must roll back its mutations and counter increment');
     await assert.rejects(() => db.exec("insert into public.folders(id,user_id,name) values('bypass','"+USER_A+"','unsafe')"),/permission denied/);
     await assert.rejects(() => db.exec('select * from public.marknote_sync_entities'),/permission denied/);
     await assert.rejects(() => db.exec('select public.marknote_sync_lock_v2()'),/permission denied/);
+
+    const quotaPath = USER_A + '/quota-note/quota-file/' + 'd'.repeat(64);
+    const initialUsage = await call('select public.marknote_sync_storage_usage_v2() as result');
+    assert.deepEqual(
+      {usedBytes:initialUsage.usedBytes,quotaBytes:initialUsage.quotaBytes,objectCount:initialUsage.objectCount,objectLimit:initialUsage.objectLimit,maxFileBytes:initialUsage.maxFileBytes},
+      {usedBytes:0,quotaBytes:104857600,objectCount:0,objectLimit:1000,maxFileBytes:20971520},
+    );
+    await assert.rejects(
+      () => db.query("insert into storage.objects(bucket_id,name,metadata) values('attachments',$1,$2::jsonb)",[
+        quotaPath, JSON.stringify({size:12,mimetype:'image/png'}),
+      ]),
+      /row-level security|policy/i,
+    );
+    const reserved = await call(
+      'select public.marknote_sync_reserve_storage_v2($1,$2,$3) as result',
+      [quotaPath,12,'image/png'],
+    );
+    assert.equal(reserved.reservedBytes,12);
+    await assert.rejects(
+      () => db.query("insert into storage.objects(bucket_id,name,metadata) values('attachments',$1,$2::jsonb)",[
+        quotaPath, JSON.stringify({size:13,mimetype:'image/png'}),
+      ]),
+      /row-level security|policy/i,
+    );
+    await db.query("insert into storage.objects(bucket_id,name,metadata) values('attachments',$1,$2::jsonb)",[
+      quotaPath, JSON.stringify({size:12,mimetype:'image/png'}),
+    ]);
+    const used = await call('select public.marknote_sync_storage_usage_v2() as result');
+    assert.equal(used.usedBytes,12);
+    assert.equal(used.objectCount,1);
+    assert.equal(used.reservedBytes,0,'uploaded paths are not double-counted while the reservation is active');
+    await db.query("update storage.objects set metadata=$2::jsonb where name=$1",[
+      quotaPath,JSON.stringify({size:1,mimetype:'image/png'}),
+    ]);
+    const immutableObject = await db.query(
+      "select metadata from storage.objects where bucket_id='attachments' and name=$1",
+      [quotaPath],
+    );
+    assert.equal(immutableObject.rows[0].metadata.size,12,'restrictive RLS must make attachment updates a no-op');
+    await db.query('select public.marknote_sync_release_storage_v2($1)',[quotaPath]);
+    await db.query("delete from storage.objects where bucket_id='attachments' and name=$1",[quotaPath]);
+
+    for (let index=0; index<5; index+=1) {
+      const path = USER_A + '/quota-note/quota-' + index + '/' + String(index).repeat(64);
+      await call('select public.marknote_sync_reserve_storage_v2($1,$2,$3) as result',[path,20971520,'image/png']);
+      await db.query("insert into storage.objects(bucket_id,name,metadata) values('attachments',$1,$2::jsonb)",[
+        path, JSON.stringify({size:20971520,mimetype:'image/png'}),
+      ]);
+      await db.query('select public.marknote_sync_release_storage_v2($1)',[path]);
+    }
+    const fullUsage = await call('select public.marknote_sync_storage_usage_v2() as result');
+    assert.equal(fullUsage.usedBytes,104857600);
+    assert.equal(fullUsage.objectCount,5);
+    await assert.rejects(
+      () => call('select public.marknote_sync_reserve_storage_v2($1,$2,$3) as result',[
+        USER_A + '/quota-note/overflow/' + 'e'.repeat(64),1,'image/png',
+      ]),
+      /quota exceeded/i,
+    );
+    await assert.rejects(
+      () => call('select public.marknote_sync_reserve_storage_v2($1,$2,$3) as result',[
+        USER_A + '/quota-note/too-large/' + 'f'.repeat(64),20971521,'image/png',
+      ]),
+      /20 MiB size limit/i,
+    );
 
     const mutation = folder('new-folder','create-folder');
     const accepted = (await push(mutation))[0];
@@ -133,6 +207,7 @@ async function main() {
 
     await actor(USER_B);
     assert.equal((await pull()).changes.length,0);
+    assert.equal((await call('select public.marknote_sync_storage_usage_v2() as result')).usedBytes,0);
     const other = (await push(folder('new-folder','create-folder')))[0];
     assert.equal(other.revision,1);
     assert.equal(other.sequence,1,'counters and mutation ids are independently scoped by auth.uid');
@@ -140,8 +215,10 @@ async function main() {
     assert.deepEqual(await call('select public.marknote_sync_collect_storage_v2() as result'),[]);
     await actor(null);
     await assert.rejects(()=>pull(),/Authentication required/);
+    await assert.rejects(()=>call('select public.marknote_sync_storage_usage_v2() as result'),/Authentication required/);
     await actor(USER_A,'anon');
     await assert.rejects(()=>pull(),/permission denied/);
+    await assert.rejects(()=>call('select public.marknote_sync_storage_usage_v2() as result'),/permission denied/);
     await assert.rejects(()=>push(mutation),/permission denied/);
 
     await actor(USER_A);
@@ -178,7 +255,7 @@ async function main() {
     await db.exec(migration);
     await actor(USER_A);
     assert.equal((await pull()).upperBound,counterBeforeReapply);
-    console.log('Sync protocol PostgreSQL tests passed (CAS, replay, paging, auth, rollback, purge, storage GC).');
+    console.log('Sync protocol PostgreSQL tests passed (CAS, replay, paging, auth, rollback, quota, purge, storage GC).');
   } finally { await db.close(); }
 }
 main().catch(error => { console.error(error); process.exitCode=1; });

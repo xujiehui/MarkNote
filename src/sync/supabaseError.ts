@@ -96,8 +96,11 @@ export function supabaseBackendErrorMessage(error: unknown, resource: string): s
   if (code === '42501' || /permission denied/i.test(message)) {
     return `${resource} exists, but the signed-in role does not have the required Data API grants or RLS policy. Reapply the authenticated GRANT and RLS policy section of the sync migration.`;
   }
+  if (code === 'MN003') {
+    return 'Cloud attachment storage is full. Each account can store up to 100 MiB and 1,000 attachment objects.';
+  }
   if (/bucket/i.test(message) || /storage/i.test(message)) {
-    return `${resource} is not reachable. Confirm the attachments Storage bucket exists and that authenticated users have SELECT, INSERT, UPDATE, and DELETE policies.`;
+    return `${resource} is not reachable. Apply the latest sync migration and confirm the private attachments bucket has SELECT, reserved INSERT, and DELETE policies.`;
   }
   return message || `${resource} is not reachable.`;
 }

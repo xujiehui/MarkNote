@@ -28,7 +28,7 @@ import {
 import { errorWithCauseMessage } from './supabaseError';
 import { db, switchWorkspaceAccount } from '../lib/db';
 import { getWorkspaceEpoch, getWorkspaceSnapshot, isWorkspaceCurrent, subscribeWorkspace } from '../workspace/state';
-import type { AuthSession, OAuthProvider, SyncBackendCheckResult, SyncResult, RemoteSyncAdapter } from './types';
+import type { AuthSession, CloudStorageUsage, OAuthProvider, SyncBackendCheckResult, SyncResult, RemoteSyncAdapter } from './types';
 
 const handledDesktopCallbackUrls = new Set<string>();
 
@@ -48,12 +48,15 @@ export interface SyncSessionState {
   checkingBackend: boolean;
   lastResult: SyncResult | null;
   backendCheck: SyncBackendCheckResult | null;
+  storageUsage: CloudStorageUsage | null;
+  storageUsageLoading: boolean;
   queue: SyncQueueSummary;
   error: string;
   signInWithOAuth: (provider: OAuthProvider) => Promise<void>;
   signOut: () => Promise<void>;
   syncNow: () => Promise<SyncResult>;
   checkBackend: () => Promise<SyncBackendCheckResult>;
+  refreshStorageUsage: () => Promise<CloudStorageUsage | null>;
 }
 
 export function useSyncSession(adapterOverride?: RemoteSyncAdapter): SyncSessionState {
@@ -67,6 +70,8 @@ export function useSyncSession(adapterOverride?: RemoteSyncAdapter): SyncSession
   const [checkingBackend, setCheckingBackend] = useState(false);
   const [lastResult, setLastResult] = useState<SyncResult | null>(null);
   const [backendCheck, setBackendCheck] = useState<SyncBackendCheckResult | null>(null);
+  const [storageUsage, setStorageUsage] = useState<CloudStorageUsage | null>(null);
+  const [storageUsageLoading, setStorageUsageLoading] = useState(false);
   const [error, setError] = useState('');
   const [queueError, setQueueError] = useState('');
   const [workspaceVersion, setWorkspaceVersion] = useState(getWorkspaceSnapshot().epoch);
@@ -74,6 +79,7 @@ export function useSyncSession(adapterOverride?: RemoteSyncAdapter): SyncSession
   const syncInFlight = useRef<Promise<SyncResult> | null>(null);
   const backendInFlight = useRef<Promise<SyncBackendCheckResult> | null>(null);
   const sessionChangeRequest = useRef(0);
+  const storageUsageRequest = useRef(0);
   const initialVerificationAttempted = useRef(new Set<string>());
 
   useEffect(() => subscribeWorkspace(() => {
@@ -97,6 +103,30 @@ export function useSyncSession(adapterOverride?: RemoteSyncAdapter): SyncSession
   const patchSessionStateRef = useCallback((patch: SyncSessionChangePatch) => {
     sessionChangeStateRef.current = patchSessionChangeState(sessionChangeStateRef.current, patch);
   }, []);
+
+  const refreshStorageUsage = useCallback(async (): Promise<CloudStorageUsage | null> => {
+    const currentSession = sessionChangeStateRef.current.session;
+    const request = ++storageUsageRequest.current;
+    if (!currentSession || !adapter.getStorageUsage) {
+      setStorageUsage(null);
+      setStorageUsageLoading(false);
+      return null;
+    }
+    setStorageUsageLoading(true);
+    try {
+      const usage = await adapter.getStorageUsage(currentSession.user.id);
+      if (request === storageUsageRequest.current
+        && currentSession.user.id === sessionChangeStateRef.current.session?.user.id) {
+        setStorageUsage(usage);
+      }
+      return usage;
+    } catch {
+      if (request === storageUsageRequest.current) setStorageUsage(null);
+      return null;
+    } finally {
+      if (request === storageUsageRequest.current) setStorageUsageLoading(false);
+    }
+  }, [adapter]);
 
   const runBackendCheck = useCallback((): Promise<SyncBackendCheckResult> => {
     if (backendInFlight.current) return backendInFlight.current;
@@ -155,6 +185,9 @@ export function useSyncSession(adapterOverride?: RemoteSyncAdapter): SyncSession
       if (request !== sessionChangeRequest.current) return sessionChangeStateRef.current;
       setRetryAttempt(0);
       if (sessionChangeStateRef.current.session?.user.id !== nextSession?.user.id) {
+        storageUsageRequest.current += 1;
+        setStorageUsage(null);
+        setStorageUsageLoading(false);
         backendInFlight.current = null;
         syncInFlight.current = null;
         setCheckingBackend(false);
@@ -206,16 +239,22 @@ export function useSyncSession(adapterOverride?: RemoteSyncAdapter): SyncSession
           }
         }
         return result;
-      } finally { if (isWorkspaceCurrent(epoch)) setSyncing(false); }
+      } finally {
+        if (isWorkspaceCurrent(epoch)) {
+          setSyncing(false);
+          void refreshStorageUsage();
+        }
+      }
     })();
     syncInFlight.current = operation;
     void operation.finally(() => { if (syncInFlight.current === operation) syncInFlight.current = null; });
     return operation;
-  }, [engine, patchSessionStateRef]);
+  }, [engine, patchSessionStateRef, refreshStorageUsage]);
 
   const checkBackend = useCallback(async () => {
     setRetryAttempt(0);
     const result = await runBackendCheck();
+    void refreshStorageUsage();
     if (
       shouldRetryAfterSuccessfulDiagnosis({
         configured: adapter.configured,
@@ -230,7 +269,17 @@ export function useSyncSession(adapterOverride?: RemoteSyncAdapter): SyncSession
       void syncNow();
     }
     return result;
-  }, [adapter.configured, queue.failed, queue.pending, runBackendCheck, syncing, syncNow]);
+  }, [adapter.configured, queue.failed, queue.pending, refreshStorageUsage, runBackendCheck, syncing, syncNow]);
+
+  useEffect(() => {
+    if (!session) {
+      storageUsageRequest.current += 1;
+      setStorageUsage(null);
+      setStorageUsageLoading(false);
+      return;
+    }
+    void refreshStorageUsage();
+  }, [refreshStorageUsage, session]);
 
   useEffect(() => {
     const queueErrorResolution = resolveQueueErrorStatus({
@@ -472,12 +521,15 @@ export function useSyncSession(adapterOverride?: RemoteSyncAdapter): SyncSession
     checkingBackend,
     lastResult,
     backendCheck,
+    storageUsage,
+    storageUsageLoading,
     queue,
     error,
     signInWithOAuth,
     signOut,
     syncNow,
     checkBackend,
+    refreshStorageUsage,
   };
 }
 

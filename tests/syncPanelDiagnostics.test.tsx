@@ -47,6 +47,12 @@ const translations: Record<string, string> = {
   'sync.signOut': 'Sign out',
   'sync.syncNow': 'Sync',
   'sync.syncing': 'Syncing',
+  'sync.cloudStorage': 'Cloud attachments',
+  'sync.cloudStorageUsage': '{used} / {quota}',
+  'sync.cloudStorageObjects': '{count} / {limit}',
+  'sync.cloudStorageLoading': 'Loading usage',
+  'sync.cloudStorageUnavailable': 'Usage unavailable',
+  'sync.refreshCloudStorage': 'Refresh cloud usage',
 };
 
 function createSyncState(overrides: Partial<SyncSessionState> = {}): SyncSessionState {
@@ -60,12 +66,15 @@ function createSyncState(overrides: Partial<SyncSessionState> = {}): SyncSession
     checkingBackend: false,
     lastResult: null,
     backendCheck: null,
+    storageUsage: null,
+    storageUsageLoading: false,
     queue: { pending: 0, failed: 0, firstError: '' },
     error: '',
     signInWithOAuth: async () => undefined,
     signOut: async () => undefined,
     syncNow: async () => ({ ok: true, pushed: 0, pulled: 0 }),
     checkBackend: async () => ({ ok: true, checkedAt: Date.now(), items: [] }),
+    refreshStorageUsage: async () => null,
     ...overrides,
   };
 }
@@ -124,6 +133,15 @@ async function main() {
         },
       ],
     },
+    storageUsage: {
+      usedBytes: 25 * 1024 * 1024,
+      quotaBytes: 100 * 1024 * 1024,
+      objectCount: 12,
+      objectLimit: 1000,
+      maxFileBytes: 20 * 1024 * 1024,
+      reservedBytes: 0,
+      reservedObjects: 0,
+    },
     syncNow: async () => {
       clicked.push('sync');
       return { ok: true, pushed: 1, pulled: 0 };
@@ -138,6 +156,10 @@ async function main() {
   });
   let mounted = await renderSyncPanel(signedIn);
   assert.match(mounted.container.textContent || '', /google@example\.com/);
+  assert.match(mounted.container.textContent || '', /Cloud attachments/);
+  assert.match(mounted.container.textContent || '', /25\.0 MB \/ 100\.0 MB/);
+  assert.match(mounted.container.textContent || '', /12 \/ 1000/);
+  assert.equal(mounted.container.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow'),String(25 * 1024 * 1024));
   assert.match(mounted.container.textContent || '', /Sync failed/);
   assert.match(mounted.container.textContent || '', /storage offline/);
   assert.doesNotMatch(mounted.container.textContent || '', /Pushed 2, pulled 1/);
@@ -291,7 +313,7 @@ async function main() {
           {
             name: 'Attachment storage canary',
             status: 'ok',
-            message: 'Attachment storage can upload, overwrite, download, and delete files.',
+            message: 'Attachment storage can reserve, upload, download, and delete immutable files.',
           },
         ],
       },
@@ -320,7 +342,7 @@ async function main() {
           {
             name: 'Attachment storage canary',
             status: 'ok',
-            message: 'Attachment storage can upload, overwrite, download, and delete files.',
+            message: 'Attachment storage can reserve, upload, download, and delete immutable files.',
           },
         ],
       },

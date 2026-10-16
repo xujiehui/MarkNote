@@ -10,7 +10,8 @@ missing v2 migration and keeps local mutations queued.
 1. Back up the Supabase database and Storage bucket, and verify a restore in a
    separate project. Keep local workspace backups as well.
 2. Deploy `supabase/migrations/202606190001_marknote_sync_schema.sql` and then
-   `supabase/migrations/202610130001_marknote_sync_v2.sql` in one transaction.
+   `supabase/migrations/202610130001_marknote_sync_v2.sql` and
+   `supabase/migrations/20261015114235_user_storage_quota.sql` in one transaction.
    `npm run print:supabase-migration` prints that complete transaction. The
    Management API helper supports a dry check (`npm run check:supabase-migration`)
    and explicit apply (`npm run apply:supabase-migration`). Supply credentials
@@ -18,7 +19,8 @@ missing v2 migration and keeps local mutations queued.
 3. Run `npm run print:supabase-readiness-check` in SQL Editor, or use the
    management dry check. Every metadata gate must pass, including revoked legacy
    DML, private internal tables, safe function ownership/search path and grants,
-   RLS, and private Storage. Read-only metadata checks do not prove online sync.
+   RLS, private quota state, immutable attachment objects, bucket limits, and
+   private Storage. Read-only metadata checks do not prove online sync.
 4. Deploy the v2 app and run `npm run check:supabase-sync:oauth` or the app's
    **Diagnose sync** with an actual signed-in account. The readiness RPC tests
    CAS/replay/tombstone writes in a rolled back subtransaction, leaving no
@@ -66,6 +68,13 @@ an old cursor intentionally fails instead of silently skipping restored data.
   overwrite a prior blob. Prefixes compare literally, including `_` and `%` IDs.
   The adapter rejects active MIME types, declared/download MIME mismatches, files
   over 20 MiB, cross-account paths and hash mismatches.
+- Each account has a database-enforced attachment allowance of 100 MiB and 1,000
+  objects, with a 20 MiB per-file bucket limit. An authenticated upload first
+  reserves its exact path, byte length, and MIME type under a per-user row lock.
+  The Storage INSERT policy accepts only an unexpired matching reservation, so
+  direct publishable-key requests and concurrent clients cannot overrun the
+  allowance. Reservations expire after 15 minutes and never count an already
+  uploaded immutable object twice.
 - Purge queues durable Storage cleanup jobs in the same server transaction.
   Cleanup removes blobs after tombstone commit, verifies disappearance, then
   acknowledges jobs. Failed removal/acknowledgement is retried during later sync;
@@ -82,7 +91,8 @@ an old cursor intentionally fails instead of silently skipping restored data.
 `tests/syncProtocol.test.cjs` against PostgreSQL compiled to WASM by PGlite.
 Those database tests execute the actual migrations, authenticated/anonymous
 roles, grants, RLS, security definer functions, bootstrap, CAS, altered retries,
-fixed-bound pages, rollback, owner isolation, purge and cleanup RPCs. No test uses
+fixed-bound pages, rollback, owner isolation, quota reservations, direct Storage
+RLS denial, quota exhaustion, purge and cleanup RPCs. No test uses
 production credentials. PGlite uses a single connection; deployment still needs
 real PostgreSQL multi-session contention and actual Supabase/PostgREST/Storage
 validation. An automated local pass does not constitute that online acceptance.

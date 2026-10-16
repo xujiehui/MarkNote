@@ -25,6 +25,14 @@ assert.match(result.stdout, /storage\.buckets/);
 assert.match(result.stdout, /storage grants/);
 assert.match(result.stdout, /storage policies/);
 assert.match(result.stdout, /attachments bucket/);
+assert.match(result.stdout, /quota tables private/);
+assert.match(result.stdout, /quota policy helper/);
+assert.match(result.stdout, /storage immutable/);
+assert.match(result.stdout, /MarkNote attachments are immutable/);
+assert.match(result.stdout, /RESTRICTIVE/);
+assert.match(result.stdout, /marknote_sync_reserve_storage_v2/);
+assert.match(result.stdout, /expected_storage_mimes/);
+assert.match(result.stdout, /allowed_mime_types <@/);
 assert.match(result.stdout, /select 'tables' as check_name/);
 
 console.log('supabase readiness check tests passed');

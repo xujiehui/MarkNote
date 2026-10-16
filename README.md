@@ -74,13 +74,15 @@ Set `VITE_SYNC_CONFIG_URL` to your backend endpoint. The distributed app should 
 
 `VITE_SUPABASE_*` and `MARKNOTE_SUPABASE_*` runtime fallbacks are intentionally unsupported. The endpoint must return a publishable key only; never return a Supabase secret/service-role key. Publishable keys are expected to be visible to a client at runtime, so production protection still comes from Supabase Auth, RLS, and Storage policies.
 
+Seeing the configuration endpoint or publishable key does not grant administrative access. Anonymous clients cannot read or write MarkNote data. Signed-in users are restricted to their own private attachment prefix and, after the quota migration, to 100 MiB, 1,000 objects, and 20 MiB per file. Uploads require a short-lived server reservation matching the path, byte length, and MIME type, so calling the Storage API directly cannot bypass the account quota.
+
 The current MarkNote project uses a public Supabase Storage object as that backend endpoint:
 `https://wgagahicbbmqbqttedjy.supabase.co/storage/v1/object/public/marknote-config/sync-config.json`.
 Apply the `marknote-config` bucket migration, upload the JSON response above as `sync-config.json`, and set the same URL as the GitHub Actions repository variable `MARKNOTE_SYNC_CONFIG_URL`. The object must contain only the Supabase URL and publishable key; never upload a secret or service-role key. The bucket is public for reads, while uploads remain a privileged deployment operation.
 
 The GitHub Pages workflow requires that repository variable and verifies Google OAuth with `https://xujiehui.github.io/MarkNote/?app=1` as the web redirect. A Pages build fails instead of publishing a local-only bundle when the variable is missing or the endpoint is absent from the generated assets. After deployment, `check:pages-deployment` downloads the live site and verifies the endpoint, CORS response, runtime payload, absence of embedded keys, and enabled Google Auth provider. In Supabase Auth URL Configuration, set **Site URL** to that Pages URL and add the same exact URL to **Redirect URLs**. Otherwise Supabase silently ignores `redirectTo` and falls back to the default `http://localhost:3000` Site URL.
 
-Back up and test recovery before applying the legacy schema and `supabase/migrations/202610130001_marknote_sync_v2.sql`. `npm run print:supabase-migration` prints both in one transaction. The current client requires V2 RPCs; follow [SYNC_V2.md](docs/SYNC_V2.md) for deployment, acceptance and rollback boundaries.
+Back up and test recovery before applying the legacy schema, `supabase/migrations/202610130001_marknote_sync_v2.sql`, and `supabase/migrations/20261015114235_user_storage_quota.sql`. `npm run print:supabase-migration` prints all three in one transaction. The current client requires V2 RPCs and the storage quota capability; follow [SYNC_V2.md](docs/SYNC_V2.md) for deployment, acceptance and rollback boundaries.
 Also apply `supabase/migrations/202607180003_marknote_sync_config_bucket.sql` before uploading `sync-config.json`.
 
 After pasting the migration into the Supabase SQL Editor, you can print a read-only readiness query with `npm run print:supabase-readiness-check` and run it in the same editor. Every row should return `ok = true`; then run `npm run verify:release:online:manual` on this machine.
@@ -92,7 +94,7 @@ SUPABASE_MANAGEMENT_TOKEN=sbp_... npm run check:supabase-migration
 SUPABASE_MANAGEMENT_TOKEN=sbp_... npm run apply:supabase-migration
 ```
 
-`check:supabase-migration` checks V2 RPCs, tables, grants, RLS, revoked legacy direct writes and private Storage policies. It exits non-zero when the backend is not ready. `apply:supabase-migration` explicitly applies the checked-in migration, then runs those checks again.
+`check:supabase-migration` checks V2 and quota RPCs, tables, grants, RLS, revoked legacy direct writes, private quota state, the 20 MiB bucket limit, immutable objects, and private Storage policies. It exits non-zero when the backend is not ready. `apply:supabase-migration` explicitly applies the checked-in migrations, then runs those checks again.
 
 In Google Cloud, create a Web application OAuth client and add your Supabase callback URL as an Authorized redirect URI: `https://<project-ref>.supabase.co/auth/v1/callback`. In Supabase Auth, enable the Google provider and paste that OAuth Client ID and Client Secret. Then add your local and production MarkNote URLs to Supabase Auth redirect URLs, for example `http://127.0.0.1:5173/?app=1`. For CLI OAuth release checks, also allow `http://127.0.0.1:**/auth/callback`; for the packaged desktop app, add `marknote://auth/callback`. If the web app is not served from the current browser URL, return `supabase.authRedirectUrl` from the sync configuration endpoint.
 
@@ -248,6 +250,8 @@ cp .env.example .env.local
 
 `VITE_SUPABASE_*` 和 `MARKNOTE_SUPABASE_*` 本地回退配置已被明确禁用。接口只能返回 publishable key，不能返回 Supabase secret/service-role key。publishable key 在客户端运行时可见是正常的，生产环境仍必须依靠 Supabase Auth、RLS 和 Storage policies 保护数据。
 
+看到配置接口或 publishable key 并不等于获得管理权限：匿名请求不能读写 MarkNote 数据；登录用户只能访问自己的私有附件前缀。应用配额迁移后，每个账号最多使用 100 MiB、保存 1,000 个对象，单文件最多 20 MiB。上传前必须取得短期服务端预约，且路径、字节数和 MIME 必须完全匹配，因此绕过客户端直接调用 Storage API 也不能绕过账号配额。
+
 当前正确的 MarkNote 项目使用 Supabase Storage 公共 JSON 对象作为这个后端接口：
 `https://wgagahicbbmqbqttedjy.supabase.co/storage/v1/object/public/marknote-config/sync-config.json`。
 先应用 `marknote-config` bucket 迁移，再将上面的 JSON 作为 `sync-config.json` 上传，并把同一个 URL 设置为 GitHub Actions 仓库变量 `MARKNOTE_SYNC_CONFIG_URL`。对象只能包含 Supabase URL 和 publishable key，不能上传 secret 或 service-role key。bucket 只公开读取，上传仍是受保护的部署操作。
@@ -256,7 +260,7 @@ GitHub Pages 工作流会强制读取这个仓库变量，并使用 `https://xuj
 
 GitHub Actions 不读取构建机上的 `.env.local`。要让 macOS/Windows 分发产物启用云同步，请在仓库的 Actions Variables 中设置 `MARKNOTE_SYNC_CONFIG_URL`；工作流会把它作为 `VITE_SYNC_CONFIG_URL` 传给 Vite。未设置时构建仍会成功，但产物明确运行在本地模式。
 
-先备份并验证恢复，再应用旧 schema 与 `supabase/migrations/202610130001_marknote_sync_v2.sql`。`npm run print:supabase-migration` 打印包含两者的事务。当前客户端要求 V2 RPC；部署、验收和回滚边界见 [SYNC_V2.md](docs/SYNC_V2.md)。
+先备份并验证恢复，再依次应用旧 schema、`supabase/migrations/202610130001_marknote_sync_v2.sql` 与 `supabase/migrations/20261015114235_user_storage_quota.sql`。`npm run print:supabase-migration` 打印包含三者的事务。当前客户端要求 V2 RPC 和 Storage quota capability；部署、验收和回滚边界见 [SYNC_V2.md](docs/SYNC_V2.md)。
 同时应用 `supabase/migrations/202607180003_marknote_sync_config_bucket.sql`，再上传 `sync-config.json`。
 
 在 Supabase SQL Editor 中粘贴迁移后，可以用 `npm run print:supabase-readiness-check` 打印只读 readiness 查询，并在同一个 SQL Editor 中执行。每一行都应返回 `ok = true`；然后在本机运行 `npm run verify:release:online:manual`。
@@ -268,7 +272,7 @@ SUPABASE_MANAGEMENT_TOKEN=sbp_... npm run check:supabase-migration
 SUPABASE_MANAGEMENT_TOKEN=sbp_... npm run apply:supabase-migration
 ```
 
-`check:supabase-migration` 检查 V2 RPC、表、grants、RLS、旧表直接写入已撤销，以及私有 Storage policies；后端未就绪时非零退出。`apply:supabase-migration` 显式应用仓库中的迁移，再执行相同检查。
+`check:supabase-migration` 检查 V2/配额 RPC、表、grants、RLS、旧表直接写入已撤销、配额状态私有、bucket 单文件 20 MiB 限制、对象不可覆盖及私有 Storage policies；后端未就绪时非零退出。`apply:supabase-migration` 显式应用仓库中的迁移，再执行相同检查。
 
 在 Google Cloud 中创建 Web application 类型的 OAuth client，并把 Supabase callback URL 加到 Authorized redirect URI：`https://<project-ref>.supabase.co/auth/v1/callback`。然后在 Supabase Auth 中启用 Google provider，填入这个 OAuth Client ID 和 Client Secret。接着把本地和生产 MarkNote URL 加到 Supabase Auth redirect URLs，例如 `http://127.0.0.1:5173/?app=1`。CLI OAuth 发布检查还需要允许 `http://127.0.0.1:**/auth/callback`；如果使用打包后的桌面应用，还要加入 `marknote://auth/callback`。如果 Web 应用不是从当前浏览器 URL 提供服务，请从同步配置接口返回 `supabase.authRedirectUrl`。
 

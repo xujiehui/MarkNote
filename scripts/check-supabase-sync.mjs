@@ -3,6 +3,7 @@ import { lookup } from 'node:dns/promises';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { GoTrueClient } from '@supabase/auth-js';
 import { errorWithCauseMessage, supabaseProjectReachabilityMessage } from './supabase-network-diagnostics.mjs';
 import { loadSupabaseRuntimeConfig, readLocalEnv } from './sync-config.mjs';
@@ -64,6 +65,7 @@ async function main() {
 
   await checkHealth();
   await checkTables('anonymous publishable key', publishableKey, { anonymous: true });
+  await checkAnonymousQuotaReservation();
 
   const authenticatedToken = accessToken || (oauthLogin ? await getOAuthAccessToken() : '');
 
@@ -87,6 +89,24 @@ async function main() {
       ].join('\n'),
     );
   }
+}
+
+async function checkAnonymousQuotaReservation() {
+  const response = await tableRequest('rpc/marknote_sync_reserve_storage_v2', publishableKey, {
+    method: 'POST',
+    body: {
+      p_path: `anonymous/diagnostic/probe/${'0'.repeat(64)}`,
+      p_size_bytes: 1,
+      p_mime_type: 'text/plain',
+    },
+  });
+  if (response.ok) {
+    throw new CheckFailedError('Anonymous quota reservation unexpectedly succeeded. Revoke anon access to marknote_sync_reserve_storage_v2 before release.');
+  }
+  if (![401, 403, 404].includes(response.status)) {
+    throw new CheckFailedError(`Anonymous quota reservation returned unexpected HTTP ${response.status}.`);
+  }
+  console.log(`Anonymous quota reservation: blocked (HTTP ${response.status})`);
 }
 
 async function getOAuthAccessToken() {
@@ -318,8 +338,8 @@ function authenticatedTableFailureMessage(results) {
 async function checkSyncTableWrites(bearerToken, userId) {
   if (!userId) throw new CheckFailedError('SUPABASE_ACCESS_TOKEN is not a valid JWT with a sub claim. Sign in again and retry the backend check.');
   const response = await tableRequest('rpc/marknote_sync_check_v2', bearerToken, { method: 'POST', body: {} });
-  if (!response.ok) throw new CheckFailedError(`Versioned sync protocol check failed: HTTP ${response.status}. Apply 202610130001_marknote_sync_v2.sql; legacy direct writes must remain disabled. ${response.body?.message || ''}`);
-  const required = ['cas','idempotency','sequence','tombstones','snapshot-paging'];
+  if (!response.ok) throw new CheckFailedError(`Versioned sync protocol check failed: HTTP ${response.status}. Apply the latest Supabase migrations; legacy direct writes must remain disabled. ${response.body?.message || ''}`);
+  const required = ['cas','idempotency','sequence','tombstones','snapshot-paging','storage-quota'];
   if (response.body?.protocolVersion !== 2 || !Array.isArray(response.body.capabilities)
     || required.some(capability => !response.body.capabilities.includes(capability))) {
     throw new CheckFailedError('Versioned sync protocol check returned an unsupported protocol.');
@@ -364,8 +384,21 @@ async function checkStorage(bearerToken, userId) {
   if (!userId) {
     throw new CheckFailedError('SUPABASE_ACCESS_TOKEN is not a valid JWT with a sub claim. Sign in again and retry the backend check.');
   }
+  await checkStorageQuota(bearerToken);
   await checkStorageList(bearerToken, userId);
   await checkStorageCanary(bearerToken, userId);
+}
+
+async function checkStorageQuota(bearerToken) {
+  const response = await tableRequest('rpc/marknote_sync_storage_usage_v2', bearerToken, { method: 'POST', body: {} });
+  if (!response.ok) throw new CheckFailedError(`Attachment storage quota check failed: HTTP ${response.status}. ${response.body?.message || ''}`);
+  const usage = response.body;
+  if (![usage?.usedBytes,usage?.quotaBytes,usage?.objectCount,usage?.objectLimit,usage?.maxFileBytes]
+    .every(value => Number.isSafeInteger(value) && value >= 0)
+    || usage.quotaBytes <= 0 || usage.objectLimit <= 0 || usage.maxFileBytes <= 0) {
+    throw new CheckFailedError('Attachment storage quota check returned invalid limits.');
+  }
+  console.log(`Attachment storage quota: ok (${usage.usedBytes}/${usage.quotaBytes} bytes, ${usage.objectCount}/${usage.objectLimit} objects)`);
 }
 
 async function checkStorageList(bearerToken, userId) {
@@ -383,9 +416,18 @@ async function checkStorageList(bearerToken, userId) {
 }
 
 async function checkStorageCanary(bearerToken, userId) {
-  const canaryPath = `${userId}/.marknote-diagnostics/check-supabase-sync-${Date.now()}.txt`;
+  const canaryBody = Buffer.from('marknote storage diagnostic v2');
+  const canaryHash = createHash('sha256').update(canaryBody).digest('hex');
+  const canaryPath = `${userId}/.marknote-diagnostics/storage-canary-${Date.now()}/${canaryHash}`;
   let shouldCleanup = false;
+  let reserved = false;
   try {
+    const reservation = await tableRequest('rpc/marknote_sync_reserve_storage_v2', bearerToken, {
+      method: 'POST',
+      body: { p_path: canaryPath, p_size_bytes: canaryBody.byteLength, p_mime_type: 'text/plain' },
+    });
+    if (!reservation.ok) throw storageError('Attachment storage quota reservation', reservation);
+    reserved = true;
     const upload = await storageRequest({
       method: 'POST',
       path: `/storage/v1/object/attachments/${encodeStoragePath(canaryPath)}`,
@@ -394,26 +436,12 @@ async function checkStorageCanary(bearerToken, userId) {
       headers: {
         'x-upsert': 'false',
       },
-      body: 'marknote storage diagnostic v1',
+      body: canaryBody,
     });
     if (!upload.ok) {
       throw storageError('Attachment storage upload', upload);
     }
     shouldCleanup = true;
-
-    const overwrite = await storageRequest({
-      method: 'POST',
-      path: `/storage/v1/object/attachments/${encodeStoragePath(canaryPath)}`,
-      bearerToken,
-      contentType: 'text/plain',
-      headers: {
-        'x-upsert': 'true',
-      },
-      body: 'marknote storage diagnostic v2',
-    });
-    if (!overwrite.ok) {
-      throw storageError('Attachment storage overwrite', overwrite);
-    }
 
     const download = await storageRequest({
       method: 'GET',
@@ -458,17 +486,23 @@ async function checkStorageCanary(bearerToken, userId) {
         && deletionCheck.body.some((entry) => entry?.name === storagePathFilename(canaryPath));
       if (!objectStillListed) {
         shouldCleanup = false;
-        console.log('Attachment storage canary: ok (upload, overwrite, download, delete)');
+        console.log('Attachment storage canary: ok (reserved immutable upload, download, delete)');
         return;
       }
       throw new CheckFailedError('Attachment storage delete returned success, but the diagnostic object is still listed.');
     }
 
     shouldCleanup = false;
-    console.log('Attachment storage canary: ok (upload, overwrite, download, delete)');
+    console.log('Attachment storage canary: ok (reserved immutable upload, download, delete)');
   } finally {
     if (shouldCleanup) {
       await deleteStorageObject(bearerToken, canaryPath).catch(() => undefined);
+    }
+    if (reserved) {
+      await tableRequest('rpc/marknote_sync_release_storage_v2', bearerToken, {
+        method: 'POST',
+        body: { p_path: canaryPath },
+      }).catch(() => undefined);
     }
   }
 }
@@ -536,7 +570,7 @@ function storageError(label, response) {
       `${label} check failed: HTTP ${response.status}`,
       response.body.code ? `Code: ${response.body.code}` : '',
       response.body.message ? `Message: ${response.body.message}` : '',
-      'Confirm the attachments bucket exists and authenticated storage.objects policies allow SELECT, INSERT, UPDATE, and DELETE for the user prefix.',
+      'Confirm the private attachments bucket exists and the latest migration allows SELECT, reserved INSERT, and DELETE for the user prefix.',
     ]
       .filter(Boolean)
       .join('\n'),

@@ -43,7 +43,7 @@ electron-builder@26.15.3 [dev]
 已验证以下行为：
 
 - DOMPurify 清洗 HTML 标签、事件属性、危险协议、SVG/MathML、嵌入文档和资源型样式；重复清洗结果稳定。合法任务、代码、图片、音视频、文件下载和独立附件引用保留。
-- URL 与数据 MIME 分类校验拒绝 JavaScript、本地文件、HTML/SVG 数据附件、凭据 URL、跨源 blob 和畸形附件引用；单附件限制为 20 MiB。
+- URL 与数据 MIME 分类校验拒绝 JavaScript、本地文件、HTML/SVG 数据附件、凭据 URL、跨源 blob 和畸形附件引用；单附件限制为 20 MiB。云端附件另由数据库强制每账号 100 MiB / 1,000 对象配额，Storage INSERT 必须匹配短期服务端预约，不能通过公开 publishable key 绕过。
 - HTML/Markdown/JSON 导入、编辑器粘贴、数据库写入、历史/草稿、远端正文和导出使用清洗边界。HTML 标题转义；代码高亮只处理文本。
 - 导出 HTML 的 CSP 禁止脚本。PDF 在 `sandbox="allow-same-origin"` 的 `srcdoc` iframe 内渲染，没有 `allow-scripts`、表单或弹窗权限。
 - Electron 外链统一限制为 HTTP(S)/mailto；IPC 校验实际 WebContents、主 frame 和应用 URL；外部导航、嵌入网页和不必要权限受到限制。生产构建包含 CSP，开发构建保留 Vite 所需兼容性。

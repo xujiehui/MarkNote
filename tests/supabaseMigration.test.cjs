@@ -4,6 +4,7 @@ const { readFileSync } = require('node:fs');
 
 const sql = readFileSync('supabase/migrations/202606190001_marknote_sync_schema.sql', 'utf8');
 const configSql = readFileSync('supabase/migrations/202607180003_marknote_sync_config_bucket.sql', 'utf8');
+const quotaSql = readFileSync('supabase/migrations/20261015114235_user_storage_quota.sql', 'utf8');
 
 assert.match(sql, /grant select, insert, update, delete on table public\.notes to authenticated;/i);
 assert.match(sql, /alter table public\.notes enable row level security;/i);
@@ -24,5 +25,16 @@ assert.match(sql, /notify pgrst, 'reload schema';/i);
 assert.match(configSql, /insert into storage\.buckets \(id, name, public\)[\s\S]*values \('marknote-config', 'marknote-config', true\)/i);
 assert.match(configSql, /on conflict \(id\) do update set public = true;/i);
 assert.doesNotMatch(configSql, /sb_(?:publishable|secret)_/i);
+assert.match(quotaSql, /marknote_sync_reserve_storage_v2/);
+assert.match(quotaSql, /marknote_sync_storage_usage_v2/);
+assert.match(quotaSql, /marknote_sync_release_storage_v2/);
+assert.match(quotaSql, /104857600/);
+assert.match(quotaSql, /20971520/);
+assert.match(quotaSql, /objectLimit', 1000/);
+assert.match(quotaSql, /private\.marknote_storage_upload_allowed\(name, metadata\)/);
+assert.match(quotaSql, /drop policy if exists "Users can update own attachment objects"/);
+assert.match(quotaSql, /create policy "MarkNote attachments are immutable"[\s\S]*as restrictive for update[\s\S]*to anon, authenticated/i);
+assert.match(quotaSql, /security definer[\s\S]*set search_path = pg_catalog/i);
+assert.doesNotMatch(quotaSql, /service.role|service_role|sb_secret_/i);
 
 console.log('supabase migration tests passed');

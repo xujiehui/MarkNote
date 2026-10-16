@@ -152,7 +152,7 @@ function backendRemediationLines(result: SyncBackendCheckResult): string[] {
   if (failedItems.some((item) => /bucket|storage/i.test(`${item.name} ${item.message}`))) {
     return [
       'The attachment Storage backend is not ready.',
-      'Confirm the private attachments bucket exists and authenticated users have SELECT, INSERT, UPDATE, and DELETE storage policies.',
+      'Apply the latest migration and confirm the private attachments bucket allows SELECT, reserved INSERT, and DELETE while restrictive RLS blocks UPDATE.',
     ];
   }
   return [];

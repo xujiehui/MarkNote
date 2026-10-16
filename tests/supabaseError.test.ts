@@ -43,7 +43,11 @@ assert.match(
 );
 assert.match(
   supabaseBackendErrorMessage({ message: 'Storage bucket not found' }, 'Attachments bucket'),
-  /SELECT, INSERT, UPDATE, and DELETE policies/,
+  /SELECT, reserved INSERT, and DELETE policies/,
+);
+assert.match(
+  supabaseBackendErrorMessage({ code: 'MN003', message: 'Cloud attachment storage quota exceeded' }, 'Attachment upload'),
+  /100 MiB and 1,000 attachment objects/,
 );
 assert.match(
   supabaseBackendErrorMessage(fetchFailure, 'Notes table'),

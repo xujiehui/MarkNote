@@ -15,6 +15,7 @@ import {
 import type {
   AuthSessionChangeHandler,
   AuthSession,
+  CloudStorageUsage,
   OAuthProvider,
   PushPayload,
   RemoteSnapshot,
@@ -223,7 +224,7 @@ export class SupabaseSyncAdapter implements RemoteSyncAdapter {
       return checkResult(checkedAt, items);
     }
     await this.assertSessionStillUser(session.user.id);
-    items.push(...(await checkAttachmentStorage({ storage: this.storageForSession(session) }, session.user.id)));
+    items.push(...(await checkAttachmentStorage(client, this.storageForSession(session), session)));
     await this.assertSessionStillUser(session.user.id);
 
     return checkResult(checkedAt, items);
@@ -385,9 +386,21 @@ export class SupabaseSyncAdapter implements RemoteSyncAdapter {
     }
   }
 
+  async getStorageUsage(expectedUserId?: string): Promise<CloudStorageUsage> {
+    const client = this.requireClient();
+    const session = await this.getSession();
+    if (!session || (expectedUserId && session.user.id !== expectedUserId)) {
+      throw new Error('Account changed or signed out; the storage request was discarded.');
+    }
+    const { data, error } = await rpcForSession(client, 'marknote_sync_storage_usage_v2', {}, session);
+    await this.assertSessionStillUser(session.user.id);
+    if (error) throw supabaseSyncError(error, 'Could not load cloud attachment usage');
+    return cloudStorageUsageFromWire(data);
+  }
+
   async uploadAttachment(attachment: ImageAttachment, expectedUserId?: string): Promise<{ storagePath: string; publicUrl?: string }> {
     const deadline = Date.now() + 28_000;
-    this.requireClient();
+    const client = this.requireClient();
     const session = await this.getSession();
     if (session && expectedUserId && session.user.id !== expectedUserId) throw new Error('Account changed; the previous request was discarded.');
     if (!session) {
@@ -407,18 +420,32 @@ export class SupabaseSyncAdapter implements RemoteSyncAdapter {
     const hash = await blobHash(blob);
     const storagePath = `${session.user.id}/${attachment.noteId}/${attachment.id}/${hash}`;
     await this.assertSessionStillUser(session.user.id);
-    const bucket = this.storageForSession(session, deadline).from(ATTACHMENTS_BUCKET);
-    const { error } = await bucket.upload(storagePath, blob, { contentType: attachment.mimeType, upsert: false, headers: { Authorization: sessionAuthorization(session) } });
-    await this.assertSessionStillUser(session.user.id);
-    if (error) {
-      if (!isStorageObjectAlreadyExists(error)) throw supabaseSyncError(error, 'Could not upload attachment');
-      // A retry may find the immutable blob. Confirm integrity before reusing it.
-      const existing = await bucket.download(storagePath);
-      if (existing.error || !existing.data || await blobHash(existing.data) !== hash) {
-        throw new Error('Existing immutable attachment failed integrity verification.');
+    const reservation = await rpcForSession(client, 'marknote_sync_reserve_storage_v2', {
+      p_path: storagePath,
+      p_size_bytes: blob.size,
+      p_mime_type: attachment.mimeType,
+    }, session, deadline);
+    if (reservation.error) throw supabaseSyncError(reservation.error, 'Could not reserve cloud attachment storage');
+    try {
+      const bucket = this.storageForSession(session, deadline).from(ATTACHMENTS_BUCKET);
+      const { error } = await bucket.upload(storagePath, await blob.arrayBuffer(), {
+        contentType: attachment.mimeType,
+        upsert: false,
+        headers: { Authorization: sessionAuthorization(session) },
+      });
+      await this.assertSessionStillUser(session.user.id);
+      if (error) {
+        if (!isStorageObjectAlreadyExists(error)) throw supabaseSyncError(error, 'Could not upload attachment');
+        // A retry may find the immutable blob. Confirm integrity before reusing it.
+        const existing = await bucket.download(storagePath);
+        if (existing.error || !existing.data || await blobHash(existing.data) !== hash) {
+          throw new Error('Existing immutable attachment failed integrity verification.');
+        }
       }
+      return { storagePath };
+    } finally {
+      await releaseStorageReservation(client, session, storagePath);
     }
-    return { storagePath };
   }
 
   async downloadAttachment(attachment: ImageAttachment, expectedUserId?: string): Promise<{ data: string }> {
@@ -520,6 +547,23 @@ function integer(value: unknown, label: string): number {
   return value;
 }
 
+function cloudStorageUsageFromWire(value: unknown): CloudStorageUsage {
+  const usage = record(value, 'cloud storage usage');
+  const result = {
+    usedBytes: integer(usage.usedBytes, 'Cloud storage used bytes'),
+    quotaBytes: integer(usage.quotaBytes, 'Cloud storage quota'),
+    objectCount: integer(usage.objectCount, 'Cloud storage object count'),
+    objectLimit: integer(usage.objectLimit, 'Cloud storage object limit'),
+    maxFileBytes: integer(usage.maxFileBytes, 'Cloud storage file limit'),
+    reservedBytes: integer(usage.reservedBytes, 'Cloud storage reserved bytes'),
+    reservedObjects: integer(usage.reservedObjects, 'Cloud storage reserved objects'),
+  };
+  if (result.quotaBytes <= 0 || result.objectLimit <= 0 || result.maxFileBytes <= 0) {
+    throw new Error('Invalid cloud storage limits.');
+  }
+  return result;
+}
+
 function entityFromWire(value: unknown): SyncEntity {
   if (value !== 'folder' && value !== 'note' && value !== 'attachment') throw new Error('Invalid remote entity kind.');
   return value;
@@ -600,8 +644,16 @@ function isStorageObjectAlreadyExists(error: unknown): boolean {
 
 function protocolError(error: unknown, fallback: string): Error {
   const message = supabaseSyncError(error, fallback);
-  message.message += ' Apply 202610130001_marknote_sync_v2.sql; unsafe legacy writes are never used as a fallback.';
+  message.message += ' Apply the latest Supabase migrations; unsafe legacy writes are never used as a fallback.';
   return message;
+}
+
+async function releaseStorageReservation(client: SupabaseClient, session: AuthSession, storagePath: string): Promise<void> {
+  try {
+    await rpcForSession(client, 'marknote_sync_release_storage_v2', { p_path: storagePath }, session, Date.now() + 5_000);
+  } catch {
+    // Reservations expire after 15 minutes; cleanup must not hide the upload result.
+  }
 }
 
 function toIso(value: number): string {
@@ -691,9 +743,13 @@ async function checkProjectHealth(url: string | undefined): Promise<SyncBackendC
   }
 }
 
-async function checkAttachmentStorage(client: Pick<SupabaseClient, 'storage'>, userId: string): Promise<SyncBackendCheckItem[]> {
-  const bucket = client.storage.from(ATTACHMENTS_BUCKET);
-  const { error: listError } = await bucket.list(userId, { limit: 1 });
+async function checkAttachmentStorage(
+  client: SupabaseClient,
+  storage: SupabaseClient['storage'],
+  session: AuthSession,
+): Promise<SyncBackendCheckItem[]> {
+  const bucket = storage.from(ATTACHMENTS_BUCKET);
+  const { error: listError } = await bucket.list(session.user.id, { limit: 1 });
   if (listError) {
     return [
       checkItem(
@@ -707,7 +763,7 @@ async function checkAttachmentStorage(client: Pick<SupabaseClient, 'storage'>, u
 
   return [
     checkItem('Attachments bucket', 'ok', 'Attachments bucket is reachable for the signed-in user.'),
-    await checkAttachmentStorageCanary(client, userId),
+    await checkAttachmentStorageCanary(client, storage, session),
   ];
 }
 
@@ -715,7 +771,7 @@ async function checkSyncTableWrites(client: SupabaseClient, session: AuthSession
   const { data, error } = await rpcForSession(client, 'marknote_sync_check_v2', {}, session);
   if (error) return checkItem(SYNC_TABLE_WRITES_CHECK_NAME, 'error', protocolError(error, 'Versioned sync readiness check failed').message, supabaseErrorCode(error));
   const readiness = data as { protocolVersion?: number; capabilities?: unknown } | null;
-  const required = ['cas', 'idempotency', 'sequence', 'tombstones', 'snapshot-paging'];
+  const required = ['cas', 'idempotency', 'sequence', 'tombstones', 'snapshot-paging', 'storage-quota'];
   if (readiness?.protocolVersion !== SYNC_PROTOCOL_VERSION || !Array.isArray(readiness.capabilities)
     || required.some((capability) => !(readiness.capabilities as unknown[]).includes(capability))) {
     return checkItem(SYNC_TABLE_WRITES_CHECK_NAME, 'error', 'Versioned sync readiness returned an unsupported protocol.');
@@ -723,13 +779,27 @@ async function checkSyncTableWrites(client: SupabaseClient, session: AuthSession
   return checkItem(SYNC_TABLE_WRITES_CHECK_NAME, 'ok', 'Versioned sync CAS, replay, and tombstone writes passed inside a rolled back diagnostic transaction.');
 }
 
-async function checkAttachmentStorageCanary(client: Pick<SupabaseClient, 'storage'>, userId: string): Promise<SyncBackendCheckItem> {
-  const bucket = client.storage.from(ATTACHMENTS_BUCKET);
-  const path = `${userId}/.marknote-diagnostics/storage-canary-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`;
+async function checkAttachmentStorageCanary(
+  client: SupabaseClient,
+  storage: SupabaseClient['storage'],
+  session: AuthSession,
+): Promise<SyncBackendCheckItem> {
+  const bucket = storage.from(ATTACHMENTS_BUCKET);
+  const blob = new Blob(['marknote storage diagnostic v2'], { type: 'text/plain' });
+  const canaryId = `storage-canary-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const path = `${session.user.id}/.marknote-diagnostics/${canaryId}/${await blobHash(blob)}`;
   let shouldCleanup = false;
 
   try {
-    const firstUpload = await bucket.upload(path, new Blob(['marknote storage diagnostic v1'], { type: 'text/plain' }), {
+    const reservation = await rpcForSession(client, 'marknote_sync_reserve_storage_v2', {
+      p_path: path,
+      p_size_bytes: blob.size,
+      p_mime_type: 'text/plain',
+    }, session);
+    if (reservation.error) {
+      return storageCanaryError(reservation.error, 'Attachment storage quota');
+    }
+    const firstUpload = await bucket.upload(path, await blob.arrayBuffer(), {
       contentType: 'text/plain',
       upsert: false,
     });
@@ -737,14 +807,6 @@ async function checkAttachmentStorageCanary(client: Pick<SupabaseClient, 'storag
       return storageCanaryError(firstUpload.error, 'Attachment storage upload');
     }
     shouldCleanup = true;
-
-    const overwrite = await bucket.upload(path, new Blob(['marknote storage diagnostic v2'], { type: 'text/plain' }), {
-      contentType: 'text/plain',
-      upsert: true,
-    });
-    if (overwrite.error) {
-      return storageCanaryError(overwrite.error, 'Attachment storage overwrite');
-    }
 
     const download = await bucket.download(path);
     if (download.error || !download.data) {
@@ -778,7 +840,7 @@ async function checkAttachmentStorageCanary(client: Pick<SupabaseClient, 'storag
         return checkItem(
           ATTACHMENT_STORAGE_CANARY_CHECK_NAME,
           'ok',
-          'Attachment storage can upload, overwrite, download, and delete files for the signed-in user.',
+          'Attachment storage quota can reserve, upload, download, and delete immutable files for the signed-in user.',
         );
       }
       return storageCanaryError(
@@ -791,12 +853,13 @@ async function checkAttachmentStorageCanary(client: Pick<SupabaseClient, 'storag
     return checkItem(
       ATTACHMENT_STORAGE_CANARY_CHECK_NAME,
       'ok',
-      'Attachment storage can upload, overwrite, download, and delete files for the signed-in user.',
+      'Attachment storage quota can reserve, upload, download, and delete immutable files for the signed-in user.',
     );
   } finally {
     if (shouldCleanup) {
       await bucket.remove([path]).catch(() => undefined);
     }
+    await releaseStorageReservation(client, session, path);
   }
 }
 

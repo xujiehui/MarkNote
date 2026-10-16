@@ -44,6 +44,16 @@ export interface PushPayload {
   };
 }
 
+export interface CloudStorageUsage {
+  usedBytes: number;
+  quotaBytes: number;
+  objectCount: number;
+  objectLimit: number;
+  maxFileBytes: number;
+  reservedBytes: number;
+  reservedObjects: number;
+}
+
 export interface RemoteSyncAdapter {
   readonly id: SyncProviderId;
   readonly name: string;
@@ -60,6 +70,7 @@ export interface RemoteSyncAdapter {
   pull(lastPulledAt: number): Promise<RemoteSnapshot>;
   push(payload: PushPayload): Promise<{ syncedAt: number }>;
   flushAttachmentGarbage?(expectedUserId?: string): Promise<void>;
+  getStorageUsage?(expectedUserId?: string): Promise<CloudStorageUsage>;
   uploadAttachment?(attachment: ImageAttachment, expectedUserId?: string): Promise<{ storagePath: string; publicUrl?: string }>;
   downloadAttachment?(attachment: ImageAttachment, expectedUserId?: string): Promise<{ data: string }>;
 }

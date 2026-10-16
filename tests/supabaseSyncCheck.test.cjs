@@ -36,8 +36,14 @@ globalThis.fetch = async (input, init = {}) => {
   if (url.includes('/rest/v1/rpc/marknote_sync_check_v2')) {
     if (process.env.MARKNOTE_TEST_RPC_MODE === 'missing') return jsonResponse(404,{code:'PGRST202',message:'Function missing'});
     if (process.env.MARKNOTE_TEST_RPC_MODE === 'unsupported') return jsonResponse(200,{protocolVersion:1,capabilities:[]});
-    return jsonResponse(200,{protocolVersion:2,capabilities:['cas','idempotency','sequence','tombstones','snapshot-paging']});
+    return jsonResponse(200,{protocolVersion:2,capabilities:['cas','idempotency','sequence','tombstones','snapshot-paging','storage-quota']});
   }
+  if (url.includes('/rest/v1/rpc/marknote_sync_storage_usage_v2')) return jsonResponse(200,{usedBytes:0,quotaBytes:104857600,objectCount:0,objectLimit:1000,maxFileBytes:20971520});
+  if (url.includes('/rest/v1/rpc/marknote_sync_reserve_storage_v2')) {
+    if (init.headers?.authorization === 'Bearer sb_publishable_test') return jsonResponse(401,{code:'42501',message:'Authentication required'});
+    return jsonResponse(200,{});
+  }
+  if (url.includes('/rest/v1/rpc/marknote_sync_release_storage_v2')) return jsonResponse(200,null);
   if (url.includes('/rest/v1/')) {
     if (method === 'GET' && url.includes('id=eq.marknote-diagnostic-')) {
       return jsonResponse(200, []);
@@ -75,7 +81,7 @@ globalThis.fetch = async (input, init = {}) => {
   }
   if (url.includes('/storage/v1/object/attachments') && method === 'DELETE') {
     const body = JSON.parse(init.body || '{}');
-    assert.match(body.prefixes[0], /^${userId}\\/\\.marknote-diagnostics\\/check-supabase-sync-/);
+    assert.match(body.prefixes[0], /^${userId}\\/\\.marknote-diagnostics\\/storage-canary-[^/]+\\/[a-f0-9]{64}$/);
     deletedObjects.add(body.prefixes[0]);
     return jsonResponse(200, []);
   }
@@ -134,8 +140,14 @@ globalThis.fetch = async (input, init = {}) => {
   if (url.includes('/rest/v1/rpc/marknote_sync_check_v2')) {
     if (process.env.MARKNOTE_TEST_RPC_MODE === 'missing') return jsonResponse(404,{code:'PGRST202',message:'Function missing'});
     if (process.env.MARKNOTE_TEST_RPC_MODE === 'unsupported') return jsonResponse(200,{protocolVersion:1,capabilities:[]});
-    return jsonResponse(200,{protocolVersion:2,capabilities:['cas','idempotency','sequence','tombstones','snapshot-paging']});
+    return jsonResponse(200,{protocolVersion:2,capabilities:['cas','idempotency','sequence','tombstones','snapshot-paging','storage-quota']});
   }
+  if (url.includes('/rest/v1/rpc/marknote_sync_storage_usage_v2')) return jsonResponse(200,{usedBytes:0,quotaBytes:104857600,objectCount:0,objectLimit:1000,maxFileBytes:20971520});
+  if (url.includes('/rest/v1/rpc/marknote_sync_reserve_storage_v2')) {
+    if (init.headers?.authorization === 'Bearer sb_publishable_test') return jsonResponse(401,{code:'42501',message:'Authentication required'});
+    return jsonResponse(200,{});
+  }
+  if (url.includes('/rest/v1/rpc/marknote_sync_release_storage_v2')) return jsonResponse(200,null);
   if (url.includes('/rest/v1/')) {
     if (method === 'GET' && url.includes('id=eq.marknote-diagnostic-')) {
       return jsonResponse(200, []);
@@ -173,7 +185,7 @@ globalThis.fetch = async (input, init = {}) => {
   }
   if (url.includes('/storage/v1/object/attachments') && method === 'DELETE') {
     const body = JSON.parse(init.body || '{}');
-    assert.match(body.prefixes[0], /^${userId}\\/\\.marknote-diagnostics\\/check-supabase-sync-/);
+    assert.match(body.prefixes[0], /^${userId}\\/\\.marknote-diagnostics\\/storage-canary-[^/]+\\/[a-f0-9]{64}$/);
     deletedObjects.add(body.prefixes[0]);
     return jsonResponse(200, []);
   }
@@ -218,6 +230,7 @@ const result = spawnSyncWithBackendConfig(['--require', preloadPath, 'scripts/ch
 
 assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
 assert.ok(result.stdout.includes('  profiles: ok'), result.stdout);
+assert.match(result.stdout, /Anonymous quota reservation: blocked/);
 assert.ok(result.stdout.includes(`Attachments bucket list: ok (${userId}/ prefix)`), result.stdout);
 assert.ok(result.stdout.includes('Sync table writes: ok'), result.stdout);
 assert.ok(result.stdout.includes('Attachment storage canary: ok'), result.stdout);
@@ -237,6 +250,7 @@ const oauthResult = spawnSyncWithBackendConfig(['--require', oauthPreloadPath, '
 });
 assert.equal(oauthResult.status, 0, `${oauthResult.stdout}\n${oauthResult.stderr}`);
 assert.match(oauthResult.stdout, /OAuth login: signed in as oauth@example.com/);
+assert.match(oauthResult.stdout, /Anonymous quota reservation: blocked/);
 assert.match(oauthResult.stdout, /Sync table writes: ok/);
 assert.match(oauthResult.stdout, /Attachment storage canary: ok/);
 
@@ -305,7 +319,7 @@ globalThis.fetch = async (input) => {
   if (url.includes('/rest/v1/rpc/marknote_sync_check_v2')) {
     if (process.env.MARKNOTE_TEST_RPC_MODE === 'missing') return jsonResponse(404,{code:'PGRST202',message:'Function missing'});
     if (process.env.MARKNOTE_TEST_RPC_MODE === 'unsupported') return jsonResponse(200,{protocolVersion:1,capabilities:[]});
-    return jsonResponse(200,{protocolVersion:2,capabilities:['cas','idempotency','sequence','tombstones','snapshot-paging']});
+    return jsonResponse(200,{protocolVersion:2,capabilities:['cas','idempotency','sequence','tombstones','snapshot-paging','storage-quota']});
   }
   if (url.includes('/rest/v1/')) {
     return jsonResponse(404, {
@@ -380,7 +394,7 @@ const missingProtocolResult = spawnSyncWithBackendConfig(['--require', preloadPa
 });
 assert.notEqual(missingProtocolResult.status,0);
 assert.match(missingProtocolResult.stderr,/Versioned sync protocol check failed/);
-assert.match(missingProtocolResult.stderr,/202610130001_marknote_sync_v2/);
+assert.match(missingProtocolResult.stderr,/latest Supabase migrations/);
 assert.doesNotMatch(missingProtocolResult.stdout,/Attachment storage canary: ok/);
 
 const invalidTokenPreloadPath = join(tempDir, 'invalid-token-preload.cjs');
@@ -395,7 +409,7 @@ globalThis.fetch = async (input) => {
   if (url.includes('/rest/v1/rpc/marknote_sync_check_v2')) {
     if (process.env.MARKNOTE_TEST_RPC_MODE === 'missing') return jsonResponse(404,{code:'PGRST202',message:'Function missing'});
     if (process.env.MARKNOTE_TEST_RPC_MODE === 'unsupported') return jsonResponse(200,{protocolVersion:1,capabilities:[]});
-    return jsonResponse(200,{protocolVersion:2,capabilities:['cas','idempotency','sequence','tombstones','snapshot-paging']});
+    return jsonResponse(200,{protocolVersion:2,capabilities:['cas','idempotency','sequence','tombstones','snapshot-paging','storage-quota']});
   }
   if (url.includes('/rest/v1/')) {
     return jsonResponse(401, { code: 'PGRST301', message: 'JWT expired' });
@@ -450,8 +464,14 @@ globalThis.fetch = async (input, init = {}) => {
   if (url.includes('/rest/v1/rpc/marknote_sync_check_v2')) {
     if (process.env.MARKNOTE_TEST_RPC_MODE === 'missing') return jsonResponse(404,{code:'PGRST202',message:'Function missing'});
     if (process.env.MARKNOTE_TEST_RPC_MODE === 'unsupported') return jsonResponse(200,{protocolVersion:1,capabilities:[]});
-    return jsonResponse(200,{protocolVersion:2,capabilities:['cas','idempotency','sequence','tombstones','snapshot-paging']});
+    return jsonResponse(200,{protocolVersion:2,capabilities:['cas','idempotency','sequence','tombstones','snapshot-paging','storage-quota']});
   }
+  if (url.includes('/rest/v1/rpc/marknote_sync_storage_usage_v2')) return jsonResponse(200,{usedBytes:0,quotaBytes:104857600,objectCount:0,objectLimit:1000,maxFileBytes:20971520});
+  if (url.includes('/rest/v1/rpc/marknote_sync_reserve_storage_v2')) {
+    if (init.headers?.authorization === 'Bearer sb_publishable_test') return jsonResponse(401,{code:'42501',message:'Authentication required'});
+    return jsonResponse(200,{});
+  }
+  if (url.includes('/rest/v1/rpc/marknote_sync_release_storage_v2')) return jsonResponse(200,null);
   if (url.includes('/rest/v1/')) {
     if (method === 'GET') {
       return jsonResponse(200, []);
@@ -477,7 +497,7 @@ globalThis.fetch = async (input, init = {}) => {
   }
   if (url.includes('/storage/v1/object/attachments') && method === 'DELETE') {
     const body = JSON.parse(init.body || '{}');
-    assert.match(body.prefixes[0], /^${userId}\\/\\.marknote-diagnostics\\/check-supabase-sync-/);
+    assert.match(body.prefixes[0], /^${userId}\\/\\.marknote-diagnostics\\/storage-canary-[^/]+\\/[a-f0-9]{64}$/);
     return jsonResponse(200, []);
   }
   return jsonResponse(500, { message: 'Unexpected URL: ' + url });

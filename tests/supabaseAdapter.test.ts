@@ -62,7 +62,7 @@ function createClientStub(options: ClientStubOptions = {}) {
   const updates: Array<{ table: string; changes: unknown; filters: string[] }> = [];
   const upserts: Array<{ table: string; options?: { onConflict?: string } }> = [];
   const storageLists: Array<{ bucket: string; path: string; limit?: number }> = [];
-  const storageUploads: Array<{ bucket: string; path: string; upsert?: boolean }> = [];
+  const storageUploads: Array<{ bucket: string; path: string; upsert?: boolean; body: unknown }> = [];
   const storageRemoves: Array<{ bucket: string; paths: string[] }> = [];
   const storageDownloads: Array<{ bucket: string; path: string }> = [];
   const storagePaths = new Set<string>();
@@ -74,7 +74,12 @@ function createClientStub(options: ClientStubOptions = {}) {
       return deferredRequest(() => {
         assert.ok(headers.Authorization,'RPC requests must bind a captured access token');
         if (options.rpcHandler) return options.rpcHandler(name,args,headers);
-        if (name === 'marknote_sync_check_v2') return { data: { protocolVersion: 2, capabilities: ['cas','idempotency','sequence','tombstones','snapshot-paging'] }, error: null };
+        if (name === 'marknote_sync_check_v2') return { data: { protocolVersion: 2, capabilities: ['cas','idempotency','sequence','tombstones','snapshot-paging','storage-quota'] }, error: null };
+        if (name === 'marknote_sync_storage_usage_v2' || name === 'marknote_sync_reserve_storage_v2') return {
+          data: { usedBytes: 5, quotaBytes: 104857600, objectCount: 1, objectLimit: 1000, maxFileBytes: 20971520, reservedBytes: 0, reservedObjects: 0 },
+          error: null,
+        };
+        if (name === 'marknote_sync_release_storage_v2') return { data: null, error: null };
         if (name === 'marknote_sync_collect_storage_v2') return { data: [], error: null };
         if (name === 'marknote_sync_ack_storage_v2') return { data: null, error: null };
         if (name === 'marknote_sync_pull_v2') return { data: { changes: [], nextSequence: args?.p_after_seq ?? 0, upperBound: args?.p_after_seq ?? 0, hasMore: false, serverTime: 10 }, error: null };
@@ -200,9 +205,8 @@ function createClientStub(options: ClientStubOptions = {}) {
               .map((storagePath) => ({ name: storagePath.slice(storagePath.lastIndexOf('/') + 1) }));
             return { data, error: options.storageError || null };
           },
-          async upload(path: string, _body: Blob, uploadOptions?: { upsert?: boolean }) {
-            void _body;
-            storageUploads.push({ bucket, path, upsert: uploadOptions?.upsert });
+          async upload(path: string, body: unknown, uploadOptions?: { upsert?: boolean }) {
+            storageUploads.push({ bucket, path, upsert: uploadOptions?.upsert, body });
             if (options.storageRejectDuplicate && storagePaths.has(path)) return { data: null,error:{code:'409',message:'already exists'} };
             if (!options.storageError) {
               storagePaths.add(path);
@@ -389,11 +393,16 @@ async function main() {
   assert.equal(checkStub.inserts.length, 0);
   assert.equal(checkStub.updates.length, 0);
   assert.equal(checkStub.deletes.length, 0);
-  assert.deepEqual(checkStub.rpcCalls, [{ name: 'marknote_sync_check_v2', args: {},headers:{Authorization:'Bearer access-ok'} }]);
+  assert.deepEqual(checkStub.rpcCalls.map((call) => call.name), [
+    'marknote_sync_check_v2',
+    'marknote_sync_reserve_storage_v2',
+    'marknote_sync_release_storage_v2',
+  ]);
   assert.equal(check.items.some((item) => item.name === 'Sync table writes' && item.status === 'ok'), true);
   assert.equal(check.items.some((item) => item.name === 'Versioned sync protocol' && item.status === 'ok'), true);
-  assert.equal(checkStub.storageUploads.length, 2);
+  assert.equal(checkStub.storageUploads.length, 1);
   assert.equal(checkStub.storageUploads[0].upsert, false);
+  assert.ok(checkStub.storageUploads[0].body instanceof ArrayBuffer);
   assert.equal(checkStub.storageDownloads.length, 2);
   assert.equal(checkStub.storageRemoves.length, 1);
   assert.equal(check.items.some((item) => item.name === 'Attachment storage canary' && item.status === 'ok'), true);
@@ -464,9 +473,9 @@ async function main() {
   const unsupportedAdapter = new SupabaseSyncAdapter('https://example.supabase.co', 'key', unsupportedStub.client as never, { storageFactory: unsupportedStub.storageFactory });
   const unsupportedCheck = await unsupportedAdapter.checkBackend();
   assert.equal(unsupportedCheck.ok, false);
-  assert.match(unsupportedCheck.items.find((item) => item.name === 'Sync table writes')?.message ?? '', /202610130001_marknote_sync_v2/);
+  assert.match(unsupportedCheck.items.find((item) => item.name === 'Sync table writes')?.message ?? '', /latest Supabase migrations/);
   assert.equal(unsupportedStub.storageUploads.length, 0);
-  await assert.rejects(() => unsupportedAdapter.pushMutations([folderMutation('f-1')]), /202610130001_marknote_sync_v2/);
+  await assert.rejects(() => unsupportedAdapter.pushMutations([folderMutation('f-1')]), /latest Supabase migrations/);
   assert.equal(unsupportedStub.upserts.length, 0);
 
   const storageLeftoverStub = createClientStub({ storageDeleteLeavesObject: true });
@@ -479,14 +488,18 @@ async function main() {
   const pushStub = createClientStub();
   pushStub.sessions.push({ access_token: 'ok', refresh_token: 'ok' });
   const adapter = new SupabaseSyncAdapter('https://example.supabase.co', 'key', pushStub.client as never, { storageFactory: pushStub.storageFactory });
+  const storageUsage = await adapter.getStorageUsage('user-1');
+  assert.equal(storageUsage.quotaBytes, 100 * 1024 * 1024);
+  assert.equal(storageUsage.objectLimit, 1000);
   const mutation = folderMutation('folder-1');
   const receipts = await adapter.pushMutations([mutation]);
   assert.equal(receipts[0].mutationId, mutation.mutationId);
   assert.equal(receipts[0].localRevision, 2);
   assert.equal(receipts[0].value?.remoteRevision, 1);
   assert.equal(pushStub.upserts.length, 0);
-  assert.equal(pushStub.rpcCalls[0].name, 'marknote_sync_push_v2');
-  const wireDocument = (pushStub.rpcCalls[0].args?.p_mutations as SyncMutation[])[0].value;
+  const firstPushCall = pushStub.rpcCalls.find((call) => call.name === 'marknote_sync_push_v2');
+  assert.ok(firstPushCall);
+  const wireDocument = (firstPushCall.args?.p_mutations as SyncMutation[])[0].value;
   assert.equal(wireDocument?.syncStatus, undefined);
   await assert.rejects(() => adapter.pushMutations([mutation,mutation]), /unique/);
   await assert.rejects(() => adapter.pushMutations([{ ...mutation, expectedRevision: -1 }]), /safe integer/);
@@ -523,6 +536,7 @@ async function main() {
   const uploaded = await adapter.uploadAttachment({ id: 'a', noteId: 'n', data: 'data:image/png;base64,aGVsbG8=', mimeType: 'image/png' });
   assert.match(uploaded.storagePath,/^user-1\/n\/a\/[a-f0-9]{64}$/);
   assert.equal(pushStub.storageUploads.at(-1)?.upsert,false);
+  assert.ok(pushStub.storageUploads.at(-1)?.body instanceof ArrayBuffer);
   const sameUpload = await adapter.uploadAttachment({ id: 'a', noteId: 'n', data: 'data:image/png;base64,aGVsbG8=', mimeType: 'image/png' });
   assert.equal(uploaded.storagePath,sameUpload.storagePath);
   const changedUpload = await adapter.uploadAttachment({ id: 'a', noteId: 'n', data: 'data:image/png;base64,aGVsbG8h', mimeType: 'image/png' });
@@ -534,6 +548,17 @@ async function main() {
   await assert.rejects(() => noSessionAdapter.downloadAttachment({ id: 'a', noteId: 'n', data: '', mimeType: 'image/png', storagePath: 'user-1/n/a' }), /sign in/);
   await assert.rejects(() => adapter.uploadAttachment({ id: 'a', noteId: 'n', data: 'data:text/html;base64,aGVsbG8=', mimeType: 'text/html' }), /Unsafe attachment/);
   await assert.rejects(() => adapter.uploadAttachment({ id: 'a', noteId: 'n', data: 'data:text/html;base64,aGVsbG8=', mimeType: 'image/png' }), /Unsafe attachment/);
+  const quotaStub = createClientStub({ rpcHandler: (name) => {
+    assert.equal(name, 'marknote_sync_reserve_storage_v2');
+    return { data: null, error: { code: 'MN003', message: 'Cloud attachment storage quota exceeded' } };
+  } });
+  quotaStub.sessions.push({ access_token: 'ok', refresh_token: 'ok' });
+  const quotaAdapter = new SupabaseSyncAdapter('https://example.supabase.co','key',quotaStub.client as never,{storageFactory:quotaStub.storageFactory});
+  await assert.rejects(
+    () => quotaAdapter.uploadAttachment({ id: 'a', noteId: 'n', data: 'data:image/png;base64,aGVsbG8=', mimeType: 'image/png' }),
+    /100 MiB and 1,000 attachment objects/,
+  );
+  assert.equal(quotaStub.storageUploads.length, 0, 'quota denial happens before Storage receives bytes');
   await assert.rejects(() => adapter.downloadAttachment({ id: 'a', noteId: 'n', data: '', mimeType: 'image/svg+xml', storagePath: 'user-1/n/a' }), /Unsafe attachment/);
   await assert.rejects(() => adapter.downloadAttachment({ id: 'a', noteId: 'n', data: '', mimeType: 'image/png', storagePath: `user-1/n/a/${'0'.repeat(64)}` }), /integrity verification/);
   const maliciousBlobStub = createClientStub({ storageDownloadBlob: new Blob(['<script>bad</script>'], { type: 'text/html' }) });
@@ -546,6 +571,7 @@ async function main() {
   let gcPath = '';
   let gcAcknowledged = false;
   const gcStub = createClientStub({ storageRejectDuplicate: true, rpcHandler: (name) => {
+    if (name === 'marknote_sync_reserve_storage_v2' || name === 'marknote_sync_release_storage_v2') return { data:null,error:null };
     if (name === 'marknote_sync_collect_storage_v2') return { data:gcAcknowledged ? [] : [gcPath],error:null };
     if (name === 'marknote_sync_ack_storage_v2') { gcAcknowledged = true; return { data:null,error:null }; }
     throw new Error('Unexpected garbage collection RPC');
@@ -564,9 +590,11 @@ async function main() {
   await gcAdapter.flushAttachmentGarbage('user-1');
   assert.equal(gcAcknowledged,true);
   assert.equal(gcStub.storageRemoves.length,1);
-  assert.deepEqual(gcStub.rpcCalls.map(call=>call.name),['marknote_sync_collect_storage_v2','marknote_sync_ack_storage_v2','marknote_sync_collect_storage_v2']);
+  assert.deepEqual(gcStub.rpcCalls.filter(call=>call.name.includes('collect')||call.name.includes('ack')).map(call=>call.name),
+    ['marknote_sync_collect_storage_v2','marknote_sync_ack_storage_v2','marknote_sync_collect_storage_v2']);
 
   const leftoverGcStub = createClientStub({ storageDeleteLeavesObject:true, rpcHandler: (name) => {
+    if (name === 'marknote_sync_reserve_storage_v2' || name === 'marknote_sync_release_storage_v2') return {data:null,error:null};
     assert.equal(name,'marknote_sync_collect_storage_v2','visible blobs must never be acknowledged as removed');
     return {data:[gcPath],error:null};
   } });
@@ -574,7 +602,7 @@ async function main() {
   const leftoverGcAdapter = new SupabaseSyncAdapter('https://example.supabase.co','key',leftoverGcStub.client as never,{storageFactory:leftoverGcStub.storageFactory});
   await leftoverGcAdapter.uploadAttachment(image,'user-1');
   await assert.rejects(()=>leftoverGcAdapter.flushAttachmentGarbage('user-1'),/remains visible/);
-  assert.equal(leftoverGcStub.rpcCalls.length,1);
+  assert.equal(leftoverGcStub.rpcCalls.filter(call=>call.name==='marknote_sync_collect_storage_v2').length,1);
 
   const switchingStub = createClientStub({ rpcHandler: (_name,args,headers) => {
     assert.equal(headers?.Authorization,'Bearer captured-a');

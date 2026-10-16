@@ -33,12 +33,15 @@ const sync: SyncSessionState = {
   checkingBackend: false,
   lastResult: null,
   backendCheck: null,
+  storageUsage: null,
+  storageUsageLoading: false,
   queue: { pending: 0, failed: 0, firstError: '' },
   error: '',
   signInWithOAuth: async () => undefined,
   signOut: async () => undefined,
   syncNow: async () => ({ ok: true, pushed: 0, pulled: 0 }),
   checkBackend: async () => ({ ok: true, checkedAt: Date.now(), items: [] }),
+  refreshStorageUsage: async () => null,
 };
 
 async function main() {

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Chrome, ClipboardCopy, Cloud, CloudOff, Loader2, LogOut, RefreshCcw, SearchCheck } from 'lucide-react';
 import { useI18n } from '../i18n';
 import { formatUpdatedAt } from '../lib/date';
+import { formatBytes, storageUsagePercent } from '../lib/storageUsage';
 import { resolveBackendVerification } from '../sync/backendVerification';
 import { formatSyncDiagnosisReport, isSyncCurrent } from '../sync/syncDisplayStatus';
 import type { SyncSessionState } from '../sync/useSyncSession';
@@ -88,6 +89,11 @@ export function SyncPanel({ sync }: SyncPanelProps) {
           </div>
         ) : null}
         <QueueSummary pending={sync.queue.pending} failed={sync.queue.failed} />
+        <CloudStorageMeter
+          usage={sync.storageUsage}
+          loading={sync.storageUsageLoading}
+          onRefresh={sync.refreshStorageUsage}
+        />
         <BackendVerificationSummary
           checked={Boolean(sync.backendCheck)}
           checking={sync.checkingBackend}
@@ -170,6 +176,58 @@ export function SyncPanel({ sync }: SyncPanelProps) {
           {sync.checkingBackend ? <Loader2 size={13} className="animate-spin" /> : <SearchCheck size={13} />}
         </button>
       </div>
+    </div>
+  );
+}
+
+function CloudStorageMeter({
+  usage,
+  loading,
+  onRefresh,
+}: {
+  usage: SyncSessionState['storageUsage'];
+  loading: boolean;
+  onRefresh: SyncSessionState['refreshStorageUsage'];
+}) {
+  const { t } = useI18n();
+  const percent = usage ? storageUsagePercent(usage.usedBytes, usage.quotaBytes) : 0;
+  return (
+    <div className="mb-2 border-y border-gray-200 py-2" data-cloud-storage-usage>
+      <div className="mb-1 flex min-w-0 items-center justify-between gap-2">
+        <span className="font-medium text-gray-700">{t('sync.cloudStorage')}</span>
+        <button
+          type="button"
+          onClick={() => void onRefresh()}
+          disabled={loading}
+          className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-gray-500 hover:bg-white hover:text-gray-700 disabled:opacity-60"
+          aria-label={t('sync.refreshCloudStorage')}
+          title={t('sync.refreshCloudStorage')}
+        >
+          <RefreshCcw size={12} className={loading ? 'animate-spin' : ''} />
+        </button>
+      </div>
+      {usage ? (
+        <>
+          <div className="mb-1 flex min-w-0 justify-between gap-2 text-[11px] text-gray-500">
+            <span>{t('sync.cloudStorageUsage', { used: formatBytes(usage.usedBytes), quota: formatBytes(usage.quotaBytes) })}</span>
+            <span className="shrink-0">{t('sync.cloudStorageObjects', { count: usage.objectCount, limit: usage.objectLimit })}</span>
+          </div>
+          <div
+            className="h-1.5 overflow-hidden rounded-full bg-gray-200"
+            role="progressbar"
+            aria-label={t('sync.cloudStorage')}
+            aria-valuemin={0}
+            aria-valuemax={usage.quotaBytes}
+            aria-valuenow={usage.usedBytes}
+          >
+            <div className="h-full bg-primary-600 transition-[width]" style={{ width: `${percent}%` }} />
+          </div>
+        </>
+      ) : (
+        <div className="text-[11px] text-gray-500">
+          {loading ? t('sync.cloudStorageLoading') : t('sync.cloudStorageUnavailable')}
+        </div>
+      )}
     </div>
   );
 }

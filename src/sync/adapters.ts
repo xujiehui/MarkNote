@@ -5,6 +5,7 @@ import type { MutationReceipt, RemoteChangePage, SyncMutation } from './protocol
 import type {
   AuthSession,
   AuthSessionChangeHandler,
+  CloudStorageUsage,
   OAuthProvider,
   PushPayload,
   RemoteSnapshot,
@@ -101,6 +102,10 @@ class BackendConfiguredSupabaseAdapter implements RemoteSyncAdapter {
 
   async flushAttachmentGarbage(expectedUserId?: string): Promise<void> {
     return (await this.requireAdapter()).flushAttachmentGarbage(expectedUserId);
+  }
+
+  async getStorageUsage(expectedUserId?: string): Promise<CloudStorageUsage> {
+    return (await this.requireAdapter()).getStorageUsage(expectedUserId);
   }
 
   async pull(lastPulledAt: number): Promise<RemoteSnapshot> {
